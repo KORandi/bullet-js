@@ -7,10 +7,11 @@
 
 const { expect } = require("chai");
 const rimraf = require("rimraf");
-const { createTestNetwork, P2PServer } = require("../../src");
+const { P2PServer } = require("../../src");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const { createTestNetwork } = require("../helpers/test-network");
 
 // Test helpers
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

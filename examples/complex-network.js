@@ -4,7 +4,7 @@
  * with a realistic partially-connected topology
  */
 
-const { createTestNetwork } = require("../src");
+const { createTestNetwork } = require("../test/helpers/test-network");
 const fs = require("fs");
 const path = require("path");
 const rimraf = require("rimraf");

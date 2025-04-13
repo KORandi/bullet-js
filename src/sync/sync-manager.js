@@ -195,6 +195,10 @@ class SyncManager {
    * Resolve conflicts between existing and new data
    * @private
    */
+  /**
+   * Resolve conflicts between existing and new data
+   * @private
+   */
   async _resolveConflicts(path, existingData, newData, incomingVectorClock) {
     let finalData = newData;
 
@@ -235,7 +239,11 @@ class SyncManager {
         if (
           strategy === "merge-fields" &&
           typeof existingData.value === "object" &&
-          typeof newData.value === "object"
+          typeof newData.value === "object" &&
+          existingData.value !== null &&
+          newData.value !== null &&
+          !Array.isArray(existingData.value) &&
+          !Array.isArray(newData.value)
         ) {
           // Use field merging to preserve fields
           finalData = this.conflictResolver.mergeFields(
@@ -247,18 +255,64 @@ class SyncManager {
           // For other strategies, accept newer data
           finalData = newData;
         }
-      } else if (comparison === 0 || comparison === 2) {
-        // Concurrent updates or identical vector clocks
-        if (comparison === 0) {
-          console.log(`Detected concurrent update conflict for ${path}`);
-        } else {
-          console.log(
-            `Identical vector clocks for ${path}, using conflict resolution`
-          );
-        }
+      } else if (comparison === 0) {
+        // Concurrent updates
+        console.log(`Detected concurrent update conflict for ${path}`);
 
         // Apply conflict resolution strategy
         finalData = this.conflictResolver.resolve(path, localData, remoteData);
+      } else if (comparison === 2) {
+        // Identical vector clocks
+        console.log(
+          `Identical vector clocks for ${path}, using conflict resolution`
+        );
+
+        if (
+          strategy === "merge-fields" &&
+          typeof existingData.value === "object" &&
+          typeof newData.value === "object" &&
+          existingData.value !== null &&
+          newData.value !== null &&
+          !Array.isArray(existingData.value) &&
+          !Array.isArray(newData.value)
+        ) {
+          // Even with identical vector clocks, try to merge fields
+          finalData = this.conflictResolver.mergeFields(
+            path,
+            existingData,
+            newData
+          );
+        } else {
+          // Apply standard conflict resolution
+          finalData = this.conflictResolver.resolve(
+            path,
+            localData,
+            remoteData
+          );
+        }
+      } else if (comparison === 1) {
+        // Local data is causally after remote data
+        console.log(`Local update for ${path} is newer than remote update`);
+
+        if (
+          strategy === "merge-fields" &&
+          typeof existingData.value === "object" &&
+          typeof newData.value === "object" &&
+          existingData.value !== null &&
+          newData.value !== null &&
+          !Array.isArray(existingData.value) &&
+          !Array.isArray(newData.value)
+        ) {
+          // Try to merge fields even when local is newer
+          finalData = this.conflictResolver.mergeFields(
+            path,
+            existingData,
+            newData
+          );
+        } else {
+          // For other strategies, keep local data
+          finalData = existingData;
+        }
       }
     }
 

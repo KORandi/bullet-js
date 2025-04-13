@@ -127,7 +127,9 @@ class ConflictResolver {
       typeof localData.value !== "object" ||
       typeof remoteData.value !== "object" ||
       localData.value === null ||
-      remoteData.value === null
+      remoteData.value === null ||
+      Array.isArray(localData.value) ||
+      Array.isArray(remoteData.value)
     ) {
       // If not objects, fall back to last-write-wins
       console.log(
@@ -143,8 +145,22 @@ class ConflictResolver {
     };
 
     // Copy all fields from both objects
-    Object.assign(result.value, localData.value);
-    Object.assign(result.value, remoteData.value);
+    if (localData.value) {
+      Object.assign(result.value, localData.value);
+    }
+
+    if (remoteData.value) {
+      // For fields that exist in both objects, determine which to keep based on timestamp
+      // For fields unique to remoteData, always include them
+      Object.keys(remoteData.value).forEach((key) => {
+        if (
+          !(key in localData.value) ||
+          remoteData.timestamp >= localData.timestamp
+        ) {
+          result.value[key] = remoteData.value[key];
+        }
+      });
+    }
 
     // Merge vector clocks (if available)
     if (localData.vectorClock && remoteData.vectorClock) {

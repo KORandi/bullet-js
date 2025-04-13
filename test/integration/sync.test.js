@@ -3,7 +3,7 @@
  */
 
 const { expect } = require("chai");
-const { createTestNetwork } = require("../../src");
+const { createTestNetwork } = require("../helpers/test-network");
 const { wait, cleanupServers } = require("../helpers/test-network");
 
 describe("Synchronization Integration Tests", function () {

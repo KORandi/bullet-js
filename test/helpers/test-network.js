@@ -5,7 +5,7 @@
 const fs = require("fs");
 const path = require("path");
 const rimraf = require("rimraf");
-const { createServer } = require("../../src");
+const { createServer, P2PServer } = require("../../src");
 
 /**
  * Wait for a specified amount of time
@@ -177,6 +177,46 @@ function createFullyConnectedNetwork(
   );
 }
 
+/**
+ * Create a network of interconnected servers for testing
+ * @param {number} count - Number of servers to create
+ * @param {number} basePort - Starting port number
+ * @param {string} dbPathPrefix - Prefix for database paths
+ * @param {Object} options - Additional options
+ * @returns {Array<P2PServer>} - Array of server instances
+ */
+function createTestNetwork(
+  count,
+  basePort = 3000,
+  dbPathPrefix = "./db-server",
+  options = {}
+) {
+  const servers = [];
+
+  for (let i = 0; i < count; i++) {
+    const port = basePort + i;
+    const dbPath = `${dbPathPrefix}${i + 1}`;
+
+    // Create peers list - each server connects to previous servers
+    const peers = [];
+    for (let j = 0; j < i; j++) {
+      peers.push(`http://localhost:${basePort + j}`);
+    }
+
+    // Create server with provided options
+    const server = new P2PServer({
+      port,
+      dbPath,
+      peers,
+      ...options,
+    });
+
+    servers.push(server);
+  }
+
+  return servers;
+}
+
 module.exports = {
   wait,
   cleanupServers,
@@ -185,4 +225,5 @@ module.exports = {
   createStarNetwork,
   createRingNetwork,
   createFullyConnectedNetwork,
+  createTestNetwork,
 };
