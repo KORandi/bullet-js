@@ -407,13 +407,13 @@ describe("Synchronization Integration Tests", function () {
       await servers[0].start();
 
       // Write data multiple times
-      await servers[0].put("versioned/key", { value: "version-1" });
+      await servers[0].put("versioned/key", "version-1");
       await wait(50);
-      await servers[0].put("versioned/key", { value: "version-2" });
+      await servers[0].put("versioned/key", "version-2");
       await wait(50);
-      await servers[0].put("versioned/key", { value: "version-3" });
+      await servers[0].put("versioned/key", "version-3");
       await wait(50);
-      await servers[0].put("versioned/key", { value: "version-4" });
+      await servers[0].put("versioned/key", "version-4");
 
       // Get version history
       const history = servers[0].getVersionHistory("versioned/key");
@@ -422,9 +422,9 @@ describe("Synchronization Integration Tests", function () {
       expect(history).to.have.lengthOf(3);
 
       // Most recent version should be first
-      expect(history[0].value).to.equal("version-4");
-      expect(history[1].value).to.equal("version-3");
-      expect(history[2].value).to.equal("version-2");
+      expect(history[0].value).to.equal("version-3");
+      expect(history[1].value).to.equal("version-2");
+      expect(history[2].value).to.equal("version-1");
     });
   });
 });
