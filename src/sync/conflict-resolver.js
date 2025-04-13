@@ -1,9 +1,16 @@
 /**
- * ConflictResolver for P2P Server
- * Handles resolution of concurrent updates with improved field merging
+ * ConflictResolver - Handles resolution of concurrent updates
+ * Implements various strategies for resolving conflicts between updates
  */
 
 class ConflictResolver {
+  /**
+   * Create a new ConflictResolver
+   * @param {Object} options - Conflict resolution options
+   * @param {string} [options.defaultStrategy="last-write-wins"] - Default resolution strategy
+   * @param {Object} [options.pathStrategies={}] - Map of paths to strategies
+   * @param {Object} [options.customResolvers={}] - Map of paths to custom resolver functions
+   */
   constructor(options = {}) {
     // Default resolution strategy
     this.defaultStrategy = options.defaultStrategy || "last-write-wins";
@@ -17,7 +24,7 @@ class ConflictResolver {
 
   /**
    * Resolve a conflict between two versions
-   * @param {String} path - The data path
+   * @param {string} path - The data path
    * @param {Object} localData - Local data with value, vectorClock, timestamp
    * @param {Object} remoteData - Remote data with value, vectorClock, timestamp
    * @returns {Object} Resolved data
@@ -25,7 +32,7 @@ class ConflictResolver {
   resolve(path, localData, remoteData) {
     // If either value is null (deleted), handle specially
     if (localData.value === null || remoteData.value === null) {
-      return this.resolveWithDeletion(path, localData, remoteData);
+      return this._resolveWithDeletion(path, localData, remoteData);
     }
 
     // Find the appropriate strategy for this path
@@ -36,30 +43,31 @@ class ConflictResolver {
     // Apply the selected strategy
     switch (strategy) {
       case "last-write-wins":
-        return this.lastWriteWins(localData, remoteData);
+        return this._lastWriteWins(localData, remoteData);
 
       case "first-write-wins":
-        return this.firstWriteWins(localData, remoteData);
+        return this._firstWriteWins(localData, remoteData);
 
       case "merge-fields":
         return this.mergeFields(path, localData, remoteData);
 
       case "custom":
-        return this.applyCustomResolver(path, localData, remoteData);
+        return this._applyCustomResolver(path, localData, remoteData);
 
       default:
         // Fallback to last-write-wins
         console.log(
           `Unknown strategy "${strategy}", falling back to last-write-wins`
         );
-        return this.lastWriteWins(localData, remoteData);
+        return this._lastWriteWins(localData, remoteData);
     }
   }
 
   /**
    * Handle conflict resolution when at least one side has a deletion
+   * @private
    */
-  resolveWithDeletion(path, localData, remoteData) {
+  _resolveWithDeletion(path, localData, remoteData) {
     // If both are deletions, take the later one
     if (localData.value === null && remoteData.value === null) {
       return localData.timestamp > remoteData.timestamp
@@ -93,27 +101,26 @@ class ConflictResolver {
 
   /**
    * Last-write-wins strategy based on timestamp
+   * @private
    */
-  lastWriteWins(localData, remoteData) {
+  _lastWriteWins(localData, remoteData) {
     return localData.timestamp >= remoteData.timestamp ? localData : remoteData;
   }
 
   /**
    * First-write-wins strategy based on timestamp
+   * @private
    */
-  firstWriteWins(localData, remoteData) {
+  _firstWriteWins(localData, remoteData) {
     return localData.timestamp <= remoteData.timestamp ? localData : remoteData;
   }
 
   /**
    * Merge fields from both objects
    * For fields present in both, use the latest timestamp
-   * This is the critical function for Test 2
    */
   mergeFields(path, localData, remoteData) {
     console.log(`Merging fields for ${path}`);
-    console.log(`Local data:`, JSON.stringify(localData.value));
-    console.log(`Remote data:`, JSON.stringify(remoteData.value));
 
     // Ensure we're dealing with objects
     if (
@@ -126,7 +133,7 @@ class ConflictResolver {
       console.log(
         `Cannot merge non-object values, falling back to last-write-wins`
       );
-      return this.lastWriteWins(localData, remoteData);
+      return this._lastWriteWins(localData, remoteData);
     }
 
     // Create a new result object based on the newer data's metadata
@@ -135,15 +142,9 @@ class ConflictResolver {
       value: {}, // Start with empty value
     };
 
-    // Simple approach - copy all fields from both objects
-    // First copy all fields from the first object
+    // Copy all fields from both objects
     Object.assign(result.value, localData.value);
-
-    // Then copy all fields from the second object
-    // This will overwrite fields that exist in both with the second object's values
     Object.assign(result.value, remoteData.value);
-
-    console.log(`Merged result:`, JSON.stringify(result.value));
 
     // Merge vector clocks (if available)
     if (localData.vectorClock && remoteData.vectorClock) {
@@ -175,27 +176,30 @@ class ConflictResolver {
 
   /**
    * Apply a custom resolver for a specific path
+   * @private
    */
-  applyCustomResolver(path, localData, remoteData) {
-    const resolver = this.getCustomResolverForPath(path);
+  _applyCustomResolver(path, localData, remoteData) {
+    const resolver = this._getCustomResolverForPath(path);
 
     if (!resolver) {
       console.warn(
         `No custom resolver found for ${path}, falling back to last-write-wins`
       );
-      return this.lastWriteWins(localData, remoteData);
+      return this._lastWriteWins(localData, remoteData);
     }
 
     try {
       return resolver(path, localData, remoteData);
     } catch (error) {
       console.error(`Error in custom resolver for ${path}:`, error);
-      return this.lastWriteWins(localData, remoteData);
+      return this._lastWriteWins(localData, remoteData);
     }
   }
 
   /**
    * Get the appropriate strategy for a path
+   * @param {string} path - Data path
+   * @returns {string} Resolution strategy
    */
   getStrategyForPath(path) {
     // Check for exact match
@@ -227,8 +231,11 @@ class ConflictResolver {
 
   /**
    * Get a custom resolver for a path
+   * @private
+   * @param {string} path - Data path
+   * @returns {Function|null} Resolver function
    */
-  getCustomResolverForPath(path) {
+  _getCustomResolverForPath(path) {
     // Check for exact match
     if (this.customResolvers[path]) {
       return this.customResolvers[path];
@@ -258,6 +265,8 @@ class ConflictResolver {
 
   /**
    * Register a custom resolver for a path or prefix
+   * @param {string} pathPrefix - Path prefix
+   * @param {Function} resolverFn - Resolver function
    */
   registerCustomResolver(pathPrefix, resolverFn) {
     this.customResolvers[pathPrefix] = resolverFn;
@@ -266,6 +275,8 @@ class ConflictResolver {
 
   /**
    * Set a resolution strategy for a path or prefix
+   * @param {string} pathPrefix - Path prefix
+   * @param {string} strategy - Strategy name
    */
   setStrategy(pathPrefix, strategy) {
     this.pathStrategies[pathPrefix] = strategy;

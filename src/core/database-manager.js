@@ -1,13 +1,16 @@
-/* eslint-disable @typescript-eslint/no-require-imports */
 /**
  * Database Manager for P2P Server
- * Compatible with level@9.0.0
+ * Provides persistent storage using LevelDB
  */
 
 const { Level } = require("level");
 const path = require("path");
 
 class DatabaseManager {
+  /**
+   * Create a new DatabaseManager
+   * @param {string} dbPath - Path to the database
+   */
   constructor(dbPath) {
     this.dbPath = dbPath;
     this.db = new Level(path.resolve(dbPath), {
@@ -18,6 +21,9 @@ class DatabaseManager {
 
   /**
    * Store data at the specified path
+   * @param {string} path - The data path
+   * @param {any} data - The data to store
+   * @returns {Promise<boolean>} - Success indicator
    */
   async put(path, data) {
     try {
@@ -31,6 +37,8 @@ class DatabaseManager {
 
   /**
    * Retrieve data from the specified path
+   * @param {string} path - The data path
+   * @returns {Promise<any>} - The stored data or null if not found
    */
   async get(path) {
     try {
@@ -47,6 +55,8 @@ class DatabaseManager {
 
   /**
    * Delete data at the specified path
+   * @param {string} path - The data path
+   * @returns {Promise<boolean>} - Success indicator
    */
   async del(path) {
     try {
@@ -63,12 +73,15 @@ class DatabaseManager {
 
   /**
    * Scan database entries by prefix
+   * @param {string} prefix - The path prefix to scan
+   * @param {Object} options - Scan options
+   * @param {number} [options.limit] - Maximum number of results
+   * @returns {Promise<Array>} - Matching entries
    */
   async scan(prefix, options = {}) {
     const limit = options.limit || -1;
     const results = [];
 
-    // In Level 9, we use the iterator() method
     try {
       // Use range to filter by prefix
       const iterator = this.db.iterator({
@@ -94,6 +107,7 @@ class DatabaseManager {
 
   /**
    * Close the database
+   * @returns {Promise<boolean>} - Success indicator
    */
   async close() {
     try {

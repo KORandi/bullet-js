@@ -1,9 +1,13 @@
 /**
- * VectorClock implementation for P2P Server
- * Enhanced to ensure proper synchronization across nodes
+ * VectorClock - Tracks causality between events in distributed systems
+ * Enables tracking of "happened-before" relationships and conflict detection
  */
 
 class VectorClock {
+  /**
+   * Create a new VectorClock
+   * @param {Object} clockData - Initial clock values
+   */
   constructor(clockData = {}) {
     this.clock = {};
 
@@ -25,6 +29,8 @@ class VectorClock {
 
   /**
    * Increment the counter for a specific node
+   * @param {string} nodeId - ID of the node
+   * @returns {VectorClock} - This vector clock (for chaining)
    */
   increment(nodeId) {
     if (!nodeId || typeof nodeId !== "string") {
@@ -38,6 +44,7 @@ class VectorClock {
 
   /**
    * Create a copy of this vector clock
+   * @returns {VectorClock} - New vector clock with same values
    */
   clone() {
     return new VectorClock({ ...this.clock });
@@ -46,6 +53,8 @@ class VectorClock {
   /**
    * Merge this vector clock with another
    * Takes the maximum value for each node ID
+   * @param {VectorClock|Object} otherClock - Clock to merge with
+   * @returns {VectorClock} - New merged vector clock
    */
   merge(otherClock) {
     // Handle different input types
@@ -86,11 +95,12 @@ class VectorClock {
 
   /**
    * Compare two vector clocks to determine their relationship
-   * Returns:
-   *  -1 if this clock is causally BEFORE other clock
-   *   0 if this clock is CONCURRENT with other clock
-   *   1 if this clock is causally AFTER other clock
-   *   2 if this clock is IDENTICAL to other clock
+   * @param {VectorClock|Object} otherClock - Clock to compare with
+   * @returns {number} Comparison result:
+   *  -1: this clock is causally BEFORE other clock
+   *   0: this clock is CONCURRENT with other clock
+   *   1: this clock is causally AFTER other clock
+   *   2: this clock is IDENTICAL to other clock
    */
   compare(otherClock) {
     // Handle different input types
@@ -151,6 +161,8 @@ class VectorClock {
 
   /**
    * Check if this clock is causally before another
+   * @param {VectorClock|Object} otherClock - Clock to compare with
+   * @returns {boolean} True if this clock is before the other
    */
   isBefore(otherClock) {
     return this.compare(otherClock) === -1;
@@ -158,6 +170,8 @@ class VectorClock {
 
   /**
    * Check if this clock is causally after another
+   * @param {VectorClock|Object} otherClock - Clock to compare with
+   * @returns {boolean} True if this clock is after the other
    */
   isAfter(otherClock) {
     return this.compare(otherClock) === 1;
@@ -165,6 +179,8 @@ class VectorClock {
 
   /**
    * Check if this clock is concurrent with another (conflict)
+   * @param {VectorClock|Object} otherClock - Clock to compare with
+   * @returns {boolean} True if this clock is concurrent with the other
    */
   isConcurrent(otherClock) {
     return this.compare(otherClock) === 0;
@@ -172,6 +188,8 @@ class VectorClock {
 
   /**
    * Check if this clock is identical to another
+   * @param {VectorClock|Object} otherClock - Clock to compare with
+   * @returns {boolean} True if this clock is identical to the other
    */
   isIdentical(otherClock) {
     return this.compare(otherClock) === 2;
@@ -179,6 +197,7 @@ class VectorClock {
 
   /**
    * Convert to JSON-serializable object
+   * @returns {Object} Clock as plain object
    */
   toJSON() {
     return { ...this.clock };
@@ -186,6 +205,8 @@ class VectorClock {
 
   /**
    * Create from JSON object
+   * @param {Object} json - Clock data as plain object
+   * @returns {VectorClock} New vector clock instance
    */
   static fromJSON(json) {
     return new VectorClock(json);
@@ -194,6 +215,7 @@ class VectorClock {
   /**
    * Get a string representation of the vector clock
    * Useful for debugging
+   * @returns {string} String representation
    */
   toString() {
     const entries = Object.entries(this.clock)
