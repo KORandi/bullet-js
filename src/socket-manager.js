@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 /**
  * SocketManager for P2P Server
- * Improves peer tracking and message broadcasting with proper shutdown support
+ * Enhanced with vector clock synchronization support
  */
 
 const socketIO = require("socket.io");
@@ -60,6 +60,20 @@ class SocketManager {
         console.log(
           `Current connections: ${peerCount} by ID, ${urlCount} by URL`
         );
+
+        // Immediately synchronize vector clocks with new peer
+        if (this.server.syncManager) {
+          // Send our current vector clock to the new peer
+          const syncMessage = {
+            type: "vector-clock-sync",
+            vectorClock: this.server.syncManager.vectorClock.toJSON(),
+            nodeId: this.server.serverID,
+            timestamp: Date.now(),
+            syncId: `init-${this.server.serverID}-${Date.now()}`,
+          };
+
+          socket.emit("vector-clock-sync", syncMessage);
+        }
       });
 
       socket.on("put", (data) => {
@@ -86,6 +100,25 @@ class SocketManager {
         }
 
         this.server.syncManager.handlePut(data);
+      });
+
+      // Add handlers for vector clock synchronization
+      socket.on("vector-clock-sync", (data) => {
+        if (this.isShuttingDown) return;
+
+        // Process via sync manager
+        if (this.server.syncManager) {
+          this.server.syncManager.handleVectorClockSync(data, socket);
+        }
+      });
+
+      socket.on("vector-clock-sync-response", (data) => {
+        if (this.isShuttingDown) return;
+
+        // Process via sync manager
+        if (this.server.syncManager) {
+          this.server.syncManager.handleVectorClockSyncResponse(data);
+        }
       });
 
       socket.on("disconnect", () => {
@@ -166,6 +199,19 @@ class SocketManager {
             serverID: this.server.serverID,
             url: this.myUrl,
           });
+
+          // After connecting, immediately synchronize vector clocks
+          if (this.server.syncManager) {
+            const syncMessage = {
+              type: "vector-clock-sync",
+              vectorClock: this.server.syncManager.vectorClock.toJSON(),
+              nodeId: this.server.serverID,
+              timestamp: Date.now(),
+              syncId: `connect-${this.server.serverID}-${Date.now()}`,
+            };
+
+            socket.emit("vector-clock-sync", syncMessage);
+          }
         });
 
         socket.on("disconnect", () => {
@@ -198,6 +244,25 @@ class SocketManager {
           }
 
           this.server.syncManager.handlePut(data);
+        });
+
+        // Add handlers for vector clock synchronization
+        socket.on("vector-clock-sync", (data) => {
+          if (this.isShuttingDown) return;
+
+          // Process via sync manager
+          if (this.server.syncManager) {
+            this.server.syncManager.handleVectorClockSync(data, socket);
+          }
+        });
+
+        socket.on("vector-clock-sync-response", (data) => {
+          if (this.isShuttingDown) return;
+
+          // Process via sync manager
+          if (this.server.syncManager) {
+            this.server.syncManager.handleVectorClockSyncResponse(data);
+          }
         });
 
         socket.on("connect_error", (error) => {
@@ -282,13 +347,15 @@ class SocketManager {
     );
     const urlPeers = Object.keys(this.socketsByUrl);
 
-    console.log(`Socket peers by ID: ${idPeers.join(", ") || "none"}`);
-    console.log(`Socket peers by URL: ${urlPeers.join(", ") || "none"}`);
-
     // Add forwarding flag to prevent infinite loops
     // If this is already a forwarded message, don't add the flag again
     if (!data.forwarded) {
       data = { ...data, forwarded: false };
+    }
+
+    // Always include our latest vector clock in outgoing messages
+    if (this.server.syncManager && this.server.syncManager.vectorClock) {
+      data.vectorClock = this.server.syncManager.vectorClock.toJSON();
     }
 
     // Track which peers we've sent to
@@ -306,7 +373,6 @@ class SocketManager {
       // Get the socket
       const socket = this.sockets[peerId];
       if (socket && socket.connected) {
-        console.log(`Sending ${event} to peer ${peerId}`);
         socket.emit(event, data);
         sentToPeers.add(peerId);
         peerCount++;
@@ -324,14 +390,17 @@ class SocketManager {
       // Get the socket
       const socket = this.socketsByUrl[url];
       if (socket && socket.connected) {
-        console.log(`Sending ${event} to peer at ${url}`);
         socket.emit(event, data);
         if (peerId) sentToPeers.add(peerId);
         peerCount++;
       }
     }
 
-    console.log(`Broadcasting ${event} for ${data.path} to ${peerCount} peers`);
+    console.log(
+      `Broadcasting ${event} for ${
+        data.path || "general message"
+      } to ${peerCount} peers`
+    );
     return peerCount;
   }
 

@@ -1,6 +1,6 @@
 /**
  * ConflictResolver for P2P Server
- * Handles resolution of concurrent updates
+ * Handles resolution of concurrent updates with improved field merging
  */
 
 class ConflictResolver {
@@ -49,6 +49,9 @@ class ConflictResolver {
 
       default:
         // Fallback to last-write-wins
+        console.log(
+          `Unknown strategy "${strategy}", falling back to last-write-wins`
+        );
         return this.lastWriteWins(localData, remoteData);
     }
   }
@@ -105,8 +108,13 @@ class ConflictResolver {
   /**
    * Merge fields from both objects
    * For fields present in both, use the latest timestamp
+   * This is the critical function for Test 2
    */
   mergeFields(path, localData, remoteData) {
+    console.log(`Merging fields for ${path}`);
+    console.log(`Local data:`, JSON.stringify(localData.value));
+    console.log(`Remote data:`, JSON.stringify(remoteData.value));
+
     // Ensure we're dealing with objects
     if (
       typeof localData.value !== "object" ||
@@ -117,40 +125,67 @@ class ConflictResolver {
       Array.isArray(remoteData.value)
     ) {
       // If not objects, fall back to last-write-wins
+      console.log(
+        `Cannot merge non-object values, falling back to last-write-wins`
+      );
       return this.lastWriteWins(localData, remoteData);
     }
 
-    // Start with a copy of the local data
+    // Start with a completely new result object
     const result = {
-      ...localData,
-      value: { ...localData.value },
+      ...localData, // Copy metadata from local data
+      value: {}, // Start with empty object for values
     };
 
-    // Create an object to track field-level timestamps
+    // Track field-level timestamps for decision making
     const fieldTimestamps = {};
 
-    // Initialize with timestamps from local data
+    // First, add all fields from local data with their timestamps
     for (const key in localData.value) {
+      result.value[key] = localData.value[key];
       fieldTimestamps[key] = localData.timestamp;
     }
 
-    // Process fields from remote data
+    // Then, process fields from remote data
     for (const key in remoteData.value) {
-      // If the field doesn't exist locally, or remote timestamp is newer
+      // If field doesn't exist locally or remote has a newer timestamp
       if (
-        !(key in result.value) ||
-        remoteData.timestamp > fieldTimestamps[key]
+        !(key in result.value) || // Field doesn't exist locally
+        remoteData.timestamp > fieldTimestamps[key] // Remote is newer
       ) {
         result.value[key] = remoteData.value[key];
         fieldTimestamps[key] = remoteData.timestamp;
       }
     }
 
-    // Merge vector clocks
-    result.vectorClock = localData.vectorClock.merge(remoteData.vectorClock);
+    // Merge vector clocks (if available)
+    if (localData.vectorClock && remoteData.vectorClock) {
+      // Handle both objects and real VectorClock instances
+      if (typeof localData.vectorClock.merge === "function") {
+        result.vectorClock = localData.vectorClock.merge(
+          remoteData.vectorClock
+        );
+      } else if (typeof remoteData.vectorClock.merge === "function") {
+        result.vectorClock = remoteData.vectorClock.merge(
+          localData.vectorClock
+        );
+      } else {
+        // Both are plain objects, manually merge
+        result.vectorClock = { ...localData.vectorClock };
+
+        // Add/update with values from remote clock
+        for (const nodeId in remoteData.vectorClock) {
+          const localCount = result.vectorClock[nodeId] || 0;
+          const remoteCount = remoteData.vectorClock[nodeId];
+          result.vectorClock[nodeId] = Math.max(localCount, remoteCount);
+        }
+      }
+    }
 
     // Use the latest timestamp
     result.timestamp = Math.max(localData.timestamp, remoteData.timestamp);
+
+    console.log(`Merged result:`, JSON.stringify(result.value));
 
     return result;
   }
@@ -185,9 +220,20 @@ class ConflictResolver {
       return this.pathStrategies[path];
     }
 
-    // Check for prefix match
+    // Check for prefix match by checking each segment
+    const pathParts = path.split("/");
+
+    // Try increasingly specific paths
+    for (let i = 1; i <= pathParts.length; i++) {
+      const partialPath = pathParts.slice(0, i).join("/");
+      if (this.pathStrategies[partialPath]) {
+        return this.pathStrategies[partialPath];
+      }
+    }
+
+    // Try prefix matches (legacy method)
     for (const prefix in this.pathStrategies) {
-      if (path.startsWith(prefix + "/")) {
+      if (path.startsWith(prefix + "/") || path === prefix) {
         return this.pathStrategies[prefix];
       }
     }
@@ -205,9 +251,20 @@ class ConflictResolver {
       return this.customResolvers[path];
     }
 
-    // Check for prefix match
+    // Check for prefix match by checking each segment
+    const pathParts = path.split("/");
+
+    // Try increasingly specific paths
+    for (let i = 1; i <= pathParts.length; i++) {
+      const partialPath = pathParts.slice(0, i).join("/");
+      if (this.customResolvers[partialPath]) {
+        return this.customResolvers[partialPath];
+      }
+    }
+
+    // Try prefix matches (legacy method)
     for (const prefix in this.customResolvers) {
-      if (path.startsWith(prefix + "/")) {
+      if (path.startsWith(prefix + "/") || path === prefix) {
         return this.customResolvers[prefix];
       }
     }
