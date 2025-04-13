@@ -49,15 +49,17 @@ class SyncManager {
    * @private
    */
   _setupIntervals(options) {
-    // Message cleanup interval
     this.cleanupInterval = setInterval(() => {
       if (!this.isShuttingDown) {
         this._cleanupProcessedMessages();
       }
     }, 60000); // Every minute
 
-    // Anti-entropy sync interval
-    if (options.antiEntropyInterval) {
+    // Anti-entropy sync interval (optional)
+    if (
+      options.antiEntropyInterval !== null &&
+      options.antiEntropyInterval !== undefined
+    ) {
       this.antiEntropyInterval = setInterval(() => {
         if (!this.isShuttingDown) {
           this.runAntiEntropy().catch((err) =>
@@ -65,6 +67,11 @@ class SyncManager {
           );
         }
       }, options.antiEntropyInterval);
+      console.log(
+        `Automatic anti-entropy scheduled every ${options.antiEntropyInterval}ms`
+      );
+    } else if (options.antiEntropyInterval === null) {
+      console.log("Automatic anti-entropy synchronization disabled");
     }
 
     // Vector clock synchronization interval

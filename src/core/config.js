@@ -78,12 +78,15 @@ function validateConfig(config) {
   if (config.sync) {
     // Anti-entropy interval
     if (config.sync.antiEntropyInterval !== undefined) {
-      if (
+      // Allow null to disable automatic anti-entropy
+      if (config.sync.antiEntropyInterval === null) {
+        // Valid case - null disables automatic anti-entropy
+      } else if (
         !Number.isInteger(config.sync.antiEntropyInterval) ||
         config.sync.antiEntropyInterval < 1000
       ) {
         throw new Error(
-          `Invalid antiEntropyInterval: ${config.sync.antiEntropyInterval}. Must be an integer >= 1000ms.`
+          `Invalid antiEntropyInterval: ${config.sync.antiEntropyInterval}. Must be an integer >= 1000ms or null to disable.`
         );
       }
     }

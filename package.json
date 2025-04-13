@@ -8,6 +8,7 @@
     "test": "mocha test/**/*.test.js",
     "test:unit": "mocha test/unit/**/*.test.js",
     "test:integration": "mocha test/integration/**/*.test.js",
+    "test:benchmark": "mocha test/benchmark/**/*.test.js",
     "example:basic": "node examples/basic-example.js",
     "example:conflict": "node examples/conflict-example.js",
     "example:complex": "node examples/complex-network.js"
