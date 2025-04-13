@@ -83,8 +83,8 @@ describe("Synchronization Integration Tests", function () {
       servers = []; // Can't use createTestNetwork for custom topology
 
       for (let i = 0; i < 5; i++) {
-        const port = 4001 + i;
-        const peers = i > 0 ? [`http://localhost:${4001 + i - 1}`] : [];
+        const port = 4000 + i;
+        const peers = i < 4 ? [`http://localhost:${4000 + i + 1}`] : [];
 
         servers.push(
           require("../../src").createServer({
@@ -107,7 +107,7 @@ describe("Synchronization Integration Tests", function () {
       await servers[0].put("multihop/test", { value: "hop-test-data" });
 
       // Wait longer for multi-hop propagation
-      await wait(3000);
+      await wait(2000);
 
       // Check if the last node received the data
       const data = await servers[4].get("multihop/test");

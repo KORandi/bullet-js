@@ -237,15 +237,22 @@ class SocketManager {
     );
     const urlPeers = Object.keys(this.socketsByUrl);
 
-    // Add forwarding flag to prevent infinite loops
-    // If this is already a forwarded message, don't add the flag again
-    if (!data.forwarded) {
-      data = { ...data, forwarded: false };
+    // Process data before sending
+    let dataToSend = { ...data };
+
+    // Initialize forwarded flag if it doesn't exist
+    if (!("forwarded" in dataToSend)) {
+      dataToSend.forwarded = false;
+    }
+
+    // Initialize or preserve hop count
+    if (!("hopCount" in dataToSend)) {
+      dataToSend.hopCount = 0;
     }
 
     // Always include our latest vector clock in outgoing messages
     if (this.server.syncManager) {
-      data.vectorClock = this.server.syncManager.getVectorClock();
+      dataToSend.vectorClock = this.server.syncManager.getVectorClock();
     }
 
     // Track which peers we've sent to

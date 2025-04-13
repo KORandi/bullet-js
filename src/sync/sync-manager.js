@@ -119,6 +119,19 @@ class SyncManager {
       return null;
     }
 
+    // Skip if we've already seen this message (our server ID is in the visited servers list)
+    if (
+      Array.isArray(data.visitedServers) &&
+      data.visitedServers.includes(this.server.serverID)
+    ) {
+      if (this.debugMode) {
+        console.log(
+          `Already visited server ${this.server.serverID}, skipping to prevent loops`
+        );
+      }
+      return null;
+    }
+
     // Mark message as processed
     if (data.msgId) {
       this.processedMessages.add(data.msgId);
@@ -268,25 +281,51 @@ class SyncManager {
    * @private
    */
   _propagateChanges(originalData, finalData) {
+    // Skip if shutting down
+    if (this.isShuttingDown) {
+      console.log(
+        `Skipping message propagation during shutdown for ${originalData.path}`
+      );
+      return;
+    }
+
     // Prepare data to broadcast with our merged vector clock
     const broadcastData = {
       ...originalData,
       vectorClock: this.vectorClock.toJSON(),
     };
 
+    // Initialize visited servers array if it doesn't exist
+    const visitedServers = Array.isArray(broadcastData.visitedServers)
+      ? broadcastData.visitedServers
+      : [];
+
+    // Add current server ID to the list of visited servers
+    if (!visitedServers.includes(this.server.serverID)) {
+      visitedServers.push(this.server.serverID);
+    }
+
     // Forward messages to help them propagate
     if (originalData.origin === this.server.serverID) {
       console.log(
         `Broadcasting update for ${originalData.path} to peers as originator`
       );
-      this.server.socketManager.broadcast("put", broadcastData);
-    } else if (!originalData.forwarded) {
+
+      this.server.socketManager.broadcast("put", {
+        ...broadcastData,
+        visitedServers,
+      });
+    } else {
       console.log(
         `Forwarding update for ${originalData.path} from ${originalData.origin || "unknown"} to peers`
       );
+      console.log(
+        `Message has visited ${visitedServers.length} servers: [${visitedServers.join(", ")}]`
+      );
+
       this.server.socketManager.broadcast("put", {
         ...broadcastData,
-        forwarded: true,
+        visitedServers,
       });
     }
   }
