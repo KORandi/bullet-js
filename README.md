@@ -350,6 +350,298 @@ The system uses a distributed architecture where each node can connect to multip
 - Uses LevelDB for data persistence
 - Implements a decentralized gossip-like protocol for data dissemination
 
+# P2P Server Conflict Resolution Implementation Guide
+
+## Introduction
+
+This guide explains how to implement and use the P2P server with advanced synchronization and conflict resolution capabilities. The system uses vector clocks to track causality between updates and provides several conflict resolution strategies that can be customized per data path.
+
+## Files Overview
+
+The implementation consists of the following new files:
+
+1. `vector-clock.js` - Implements vector clocks for causality tracking
+2. `conflict-resolver.js` - Handles conflict detection and resolution
+3. `sync-manager.js` - sync manager with conflict resolution
+4. `server.js` - Main server class with improved synchronization
+5. `example.js` - Example demonstrating the new features
+
+## Getting Started
+
+### 1. Installation
+
+Add the new files to your project's `src` directory. Make sure you have the dependencies from the original `package.json`.
+
+### 2. Basic Usage
+
+To create a P2P server with conflict resolution:
+
+```javascript
+const P2PServer = require("./src/server");
+
+const server = new P2PServer({
+  port: 3000,
+  dbPath: "./my-database",
+  peers: ["http://localhost:3001"], // Other peers to connect to
+
+  // Configure conflict resolution
+  conflict: {
+    defaultStrategy: "merge-fields", // Default strategy for all paths
+    pathStrategies: {
+      // Set different strategies for specific paths
+      users: "merge-fields",
+      products: "last-write-wins",
+      settings: "first-write-wins",
+    },
+  },
+
+  // Configure sync behavior
+  sync: {
+    antiEntropyInterval: 30000, // Run anti-entropy every 30 seconds
+    maxVersions: 5, // Keep 5 versions in history
+    maxMessageAge: 300000, // Keep processed messages for 5 minutes
+  },
+});
+
+// Start the server
+server.start();
+```
+
+### 3. API Methods
+
+The server provides the same API as the original P2P server, with some additions:
+
+```javascript
+// Basic operations
+await server.put(path, value);
+const data = await server.get(path);
+await server.del(path);
+const results = await server.scan(prefix, options);
+
+// New methods
+const history = server.getVersionHistory(path);
+server.setConflictStrategy(path, strategy);
+server.registerConflictResolver(path, resolverFunction);
+await server.runAntiEntropy();
+```
+
+## Conflict Resolution Strategies
+
+The system offers several built-in conflict resolution strategies:
+
+### 1. `last-write-wins`
+
+Uses timestamps to determine the winner. The update with the newer timestamp wins.
+
+```javascript
+server.setConflictStrategy("products", "last-write-wins");
+```
+
+### 2. `first-write-wins`
+
+Opposite of last-write-wins. The update with the older timestamp wins. Useful for configuration data that should be stable once set.
+
+```javascript
+server.setConflictStrategy("settings", "first-write-wins");
+```
+
+### 3. `merge-fields`
+
+For object values, merges fields from both updates. For fields present in both objects, it uses the one with the newer timestamp.
+
+```javascript
+server.setConflictStrategy("users", "merge-fields");
+```
+
+### 4. `custom`
+
+Use a custom resolver function for the most complex cases.
+
+```javascript
+// Custom resolver that takes the minimum stock level
+const safeStockResolver = (path, localData, remoteData) => {
+  if (!("stock" in localData.value) || !("stock" in remoteData.value)) {
+    return localData.timestamp >= remoteData.timestamp ? localData : remoteData;
+  }
+
+  // Take the lowest stock value to be safe
+  const safeStock = Math.min(localData.value.stock, remoteData.value.stock);
+
+  // Use the newer timestamp for the result
+  const result =
+    localData.timestamp >= remoteData.timestamp
+      ? { ...localData }
+      : { ...remoteData };
+
+  // Override the stock value with our safe minimum
+  result.value = { ...result.value, stock: safeStock };
+
+  return result;
+};
+
+server.registerConflictResolver("inventory", safeStockResolver);
+server.setConflictStrategy("inventory", "custom");
+```
+
+## Vector Clocks
+
+Vector clocks track the causal history of updates and help detect concurrent modifications. Each update includes a vector clock that counts the operations from each known node.
+
+When two vector clocks are compared:
+
+- If A < B: A happened before B
+- If A > B: A happened after B
+- If A || B: A and B are concurrent (conflict)
+
+## Understanding Conflicts
+
+Conflicts occur when two nodes make changes to the same data without knowledge of each other's updates. The system detects these conflicts by comparing vector clocks.
+
+When a conflict is detected, the system:
+
+1. Determines which conflict resolution strategy applies to the data path
+2. Applies the strategy to merge the conflicting versions
+3. Updates the vector clock to reflect both changes
+4. Propagates the resolved data to other nodes
+
+## Anti-Entropy Synchronization
+
+The system periodically runs "anti-entropy" synchronization to ensure consistency, even when normal message propagation fails. This process:
+
+1. Selects a random peer
+2. Sends recent changes to ensure the peer has the latest data
+3. Runs automatically based on the configured interval
+
+## Version History
+
+The system maintains a history of previous versions for each data path, which enables:
+
+- Auditing changes
+- Better conflict resolution with historical context
+- Potential rollback capability
+
+Access version history with:
+
+```javascript
+const history = server.getVersionHistory("users/user123");
+```
+
+## REST API Endpoints
+
+The server includes additional REST API endpoints:
+
+- `GET /api/history/:path` - Get version history for a path
+- `GET /api/status` - Get server status including vector clock info
+
+## Best Practices
+
+1. **Choose appropriate conflict strategies** for different types of data:
+
+   - Use `merge-fields` for user profiles and other composite objects
+   - Use `last-write-wins` for chat messages and timestamped content
+   - Use `first-write-wins` for configuration settings that should be stable
+   - Use custom resolvers for complex business logic
+
+2. **Anti-entropy interval**: Set based on your network characteristics:
+
+   - For reliable networks: 1-5 minutes
+   - For unreliable networks: 30-60 seconds
+
+3. **Version history**: Adjust `maxVersions` based on your needs:
+
+   - Higher values provide more history but consume more memory
+   - 5-10 versions is a good default
+
+4. **Path organization**: Organize data paths to align with conflict resolution needs:
+   - Group related data under common prefixes to apply the same strategy
+
+## Advanced Configuration
+
+### Custom Conflict Resolution
+
+For complex business logic, implement custom resolver functions:
+
+```javascript
+const customResolver = (path, localData, remoteData) => {
+  // localData and remoteData contain:
+  // - value: The data value
+  // - timestamp: Update timestamp
+  // - vectorClock: Vector clock (as object)
+  // - origin: Node ID that created the update
+  // Your custom logic here
+  // Return the resolved data object
+};
+
+server.registerConflictResolver("specific/path", customResolver);
+server.setConflictStrategy("specific/path", "custom");
+```
+
+### Configuring Multiple Paths at Once
+
+Set up multiple path strategies when creating the server:
+
+```javascript
+const server = new P2PServer({
+  // ... other options
+  conflict: {
+    defaultStrategy: "last-write-wins",
+    pathStrategies: {
+      users: "merge-fields",
+      products: "last-write-wins",
+      settings: "first-write-wins",
+      inventory: "custom",
+    },
+  },
+});
+
+// Register any custom resolvers
+server.registerConflictResolver("inventory", inventoryResolver);
+```
+
+### Flowchart
+
+```mermaid
+flowchart TD
+    Start([Data Update]) --> VectorCheck{Compare\nVector Clocks}
+
+    VectorCheck -->|A before B| UseB[Use Newer Data\nB wins]
+    VectorCheck -->|B before A| UseA[Use Newer Data\nA wins]
+    VectorCheck -->|Concurrent| Conflict[Detect Conflict]
+
+    Conflict --> Strategy{Determine\nResolution Strategy}
+
+    Strategy -->|last-write-wins| LWW[Later Timestamp Wins]
+    Strategy -->|first-write-wins| FWW[Earlier Timestamp Wins]
+    Strategy -->|merge-fields| MF[Merge Fields\nper Timestamp]
+    Strategy -->|custom| CR[Run Custom\nResolver Function]
+
+    LWW --> Resolved[Resolved Data]
+    FWW --> Resolved
+    MF --> Resolved
+    CR --> Resolved
+    UseB --> Resolved
+    UseA --> Resolved
+
+    Resolved --> MergeVC[Merge Vector Clocks]
+    MergeVC --> Store[Store Resolved Data]
+    Store --> Propagate[Propagate to Peers]
+    Store --> History[Add to Version History]
+
+    subgraph VCCompare[Vector Clock Comparison]
+        VC1["Node1: 3\nNode2: 1"] -.->|Compare| VC2["Node1: 2\nNode2: 3"]
+        VC3["Node1: 3\nNode2: 1"] -.->|Concurrent with| VC4["Node1: 2\nNode2: 3"]
+    end
+
+    subgraph FieldMerge[Field Merging Example]
+        F1["name: Alice\nemail: old@example.com\nage: 30"] -.->|Merge| F2["name: Alice\nemail: new@example.com\nrole: admin"]
+        F3["name: Alice\nemail: new@example.com\nage: 30\nrole: admin"] -.->|Result| F3
+    end
+```
+
+## Conclusion
+
+The P2P server provides robust synchronization and conflict resolution capabilities for distributed applications. By leveraging vector clocks and customizable conflict strategies, it ensures data consistency across partially connected networks while handling concurrent modifications gracefully.
+
 ## License
 
 MIT

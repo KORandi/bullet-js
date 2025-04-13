@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 /**
- * Enhanced SocketManager for P2P Server
+ * SocketManager for P2P Server
  * Improves peer tracking and message broadcasting
  */
 
