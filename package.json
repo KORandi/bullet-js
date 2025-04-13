@@ -8,10 +8,6 @@
     "test": "mocha test/**/*.test.js",
     "test:unit": "mocha test/unit/**/*.test.js",
     "test:integration": "mocha test/integration/**/*.test.js",
-    "lint": "eslint .",
-    "lint:fix": "eslint . --fix",
-    "format": "prettier --write \"**/*.{js,json,md}\"",
-    "format:check": "prettier --check \"**/*.{js,json,md}\"",
     "example:basic": "node examples/basic-example.js",
     "example:conflict": "node examples/conflict-example.js",
     "example:complex": "node examples/complex-network.js"

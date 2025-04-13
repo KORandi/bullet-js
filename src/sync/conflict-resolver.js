@@ -209,20 +209,43 @@ class ConflictResolver {
 
     // Check for prefix match by checking each segment
     const pathParts = path.split("/");
+    let longestMatch = null;
+    let longestMatchLength = 0;
 
-    // Try increasingly specific paths
-    for (let i = 1; i <= pathParts.length; i++) {
+    // Try increasingly specific paths and find the longest match
+    for (let i = pathParts.length; i > 0; i--) {
       const partialPath = pathParts.slice(0, i).join("/");
       if (this.pathStrategies[partialPath]) {
-        return this.pathStrategies[partialPath];
+        // Found a match, check if it's longer than our current longest match
+        if (partialPath.length > longestMatchLength) {
+          longestMatch = partialPath;
+          longestMatchLength = partialPath.length;
+        }
       }
     }
 
+    // If we found a match, return its strategy
+    if (longestMatch) {
+      return this.pathStrategies[longestMatch];
+    }
+
     // Try prefix matches (legacy method)
+    let bestMatch = null;
+    let bestMatchLength = 0;
+
     for (const prefix in this.pathStrategies) {
       if (path.startsWith(prefix + "/") || path === prefix) {
-        return this.pathStrategies[prefix];
+        // Found a match, check if it's longer than our current best match
+        if (prefix.length > bestMatchLength) {
+          bestMatch = prefix;
+          bestMatchLength = prefix.length;
+        }
       }
+    }
+
+    // If we found a match, return its strategy
+    if (bestMatch) {
+      return this.pathStrategies[bestMatch];
     }
 
     // Return default strategy
@@ -243,20 +266,43 @@ class ConflictResolver {
 
     // Check for prefix match by checking each segment
     const pathParts = path.split("/");
+    let longestMatch = null;
+    let longestMatchLength = 0;
 
-    // Try increasingly specific paths
-    for (let i = 1; i <= pathParts.length; i++) {
+    // Try increasingly specific paths and find the longest match
+    for (let i = pathParts.length; i > 0; i--) {
       const partialPath = pathParts.slice(0, i).join("/");
       if (this.customResolvers[partialPath]) {
-        return this.customResolvers[partialPath];
+        // Found a match, check if it's longer than our current longest match
+        if (partialPath.length > longestMatchLength) {
+          longestMatch = partialPath;
+          longestMatchLength = partialPath.length;
+        }
       }
     }
 
+    // If we found a match, return its resolver
+    if (longestMatch) {
+      return this.customResolvers[longestMatch];
+    }
+
     // Try prefix matches (legacy method)
+    let bestMatch = null;
+    let bestMatchLength = 0;
+
     for (const prefix in this.customResolvers) {
       if (path.startsWith(prefix + "/") || path === prefix) {
-        return this.customResolvers[prefix];
+        // Found a match, check if it's longer than our current best match
+        if (prefix.length > bestMatchLength) {
+          bestMatch = prefix;
+          bestMatchLength = prefix.length;
+        }
       }
+    }
+
+    // If we found a match, return its resolver
+    if (bestMatch) {
+      return this.customResolvers[bestMatch];
     }
 
     // No custom resolver found
