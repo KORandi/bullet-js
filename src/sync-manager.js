@@ -1,6 +1,6 @@
 /**
  * Sync Manager for P2P Server
- * Handles data synchronization with conflict resolution
+ * Handles data synchronization with conflict resolution and proper shutdown
  */
 
 const VectorClock = require("./vector-clock");
@@ -19,23 +19,60 @@ class SyncManager {
     );
     this.versionHistory = new Map(); // Store version history for keys
     this.maxVersions = options.maxVersions || 10; // Maximum versions to keep
+    this.isShuttingDown = false; // Flag to indicate shutdown in progress
 
     // Initialize vector clock for this node
     this.vectorClock.increment(this.server.serverID);
 
     // Clear processed messages periodically
-    setInterval(() => this.cleanupProcessedMessages(), 60000); // Clean up every minute
+    this.cleanupInterval = setInterval(() => {
+      if (!this.isShuttingDown) {
+        this.cleanupProcessedMessages();
+      }
+    }, 60000); // Clean up every minute
 
     // Periodically run anti-entropy sync
     if (options.antiEntropyInterval) {
-      setInterval(() => this.runAntiEntropy(), options.antiEntropyInterval);
+      this.antiEntropyInterval = setInterval(() => {
+        if (!this.isShuttingDown) {
+          this.runAntiEntropy();
+        }
+      }, options.antiEntropyInterval);
     }
+  }
+
+  /**
+   * Mark the sync manager as shutting down, stopping intervals
+   */
+  prepareForShutdown() {
+    this.isShuttingDown = true;
+
+    // Clear intervals
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+      console.log("Cleanup interval stopped");
+    }
+
+    if (this.antiEntropyInterval) {
+      clearInterval(this.antiEntropyInterval);
+      this.antiEntropyInterval = null;
+      console.log("Anti-entropy interval stopped");
+    }
+
+    console.log("SyncManager prepared for shutdown");
   }
 
   /**
    * Handle PUT operations with conflict resolution
    */
   async handlePut(data) {
+    // Skip if shutting down
+    if (this.isShuttingDown) {
+      console.log(`Skipping data processing during shutdown for ${data.path}`);
+      return false;
+    }
+
     // Skip if we've already processed this message
     if (this.processedMessages.has(data.msgId)) {
       console.log(`Already processed message ${data.msgId}, skipping`);
@@ -100,6 +137,10 @@ class SyncManager {
           // Concurrent updates, need to resolve conflict
           console.log(`Detected concurrent update conflict for ${data.path}`);
 
+          // Check if we need to use a custom conflict resolution strategy based on path
+          const strategy = this.conflictResolver.getStrategyForPath(data.path);
+          console.log(`Using ${strategy} strategy for ${data.path}`);
+
           // Use conflict resolver
           const resolvedData = this.conflictResolver.resolve(
             data.path,
@@ -107,25 +148,37 @@ class SyncManager {
             remoteData
           );
 
-          // Update vector clock of resolved data
-          resolvedData.vectorClock = localData.vectorClock.merge(
-            remoteData.vectorClock
-          );
+          // Ensure resolvedData has a merged vector clock
+          if (
+            !resolvedData.vectorClock ||
+            typeof resolvedData.vectorClock.merge !== "function"
+          ) {
+            resolvedData.vectorClock = localData.vectorClock.merge(
+              remoteData.vectorClock
+            );
+          }
 
           // Use the resolved data
           finalData = resolvedData;
+
+          console.log(`Conflict resolution complete for ${data.path}`);
         } else {
-          // Identical vector clocks
-          if (data.timestamp > existingData.timestamp) {
+          // Identical vector clocks, use timestamp as tiebreaker
+          // Check if we need to use first-write-wins
+          const strategy = this.conflictResolver.getStrategyForPath(data.path);
+          if (strategy === "first-write-wins") {
             console.log(
-              `Update for ${data.path} has newer timestamp with identical vector clock`
+              `Identical vector clocks, using first-write-wins for ${data.path}`
             );
-            finalData = newData;
+            finalData =
+              data.timestamp < existingData.timestamp ? newData : existingData;
           } else {
+            // Default to last-write-wins for identical vector clocks
             console.log(
-              `Update for ${data.path} has older timestamp with identical vector clock`
+              `Identical vector clocks, using last-write-wins for ${data.path}`
             );
-            finalData = existingData;
+            finalData =
+              data.timestamp > existingData.timestamp ? newData : existingData;
           }
         }
 
@@ -143,6 +196,15 @@ class SyncManager {
       } else {
         // Merge remote vector clock with ours
         this.vectorClock = this.vectorClock.merge(incomingVectorClock);
+
+        // Ensure finalData has the complete vector clock
+        if (
+          typeof finalData.vectorClock === "object" &&
+          !Array.isArray(finalData.vectorClock)
+        ) {
+          // If it's an object of vector clock values, make sure it has all entries
+          finalData.vectorClock = this.vectorClock.toJSON();
+        }
       }
 
       // Store final data in database
@@ -150,6 +212,22 @@ class SyncManager {
 
       // Notify subscribers
       this.notifySubscribers(data.path, finalData.value);
+
+      // Don't forward messages if shutting down
+      if (this.isShuttingDown) {
+        console.log(
+          `Skipping message forwarding during shutdown for ${data.path}`
+        );
+        return finalData;
+      }
+
+      // Don't forward anti-entropy messages - they're already being synchronized
+      if (data.antiEntropy) {
+        console.log(
+          `Skipping forwarding for anti-entropy sync message for ${data.path}`
+        );
+        return finalData;
+      }
 
       // Forward messages to help them propagate through the network
       // If we're the origin, broadcast to all our peers
@@ -189,6 +267,8 @@ class SyncManager {
    * Add data to version history
    */
   addToVersionHistory(path, data) {
+    if (this.isShuttingDown) return;
+
     if (!this.versionHistory.has(path)) {
       this.versionHistory.set(path, []);
     }
@@ -223,6 +303,10 @@ class SyncManager {
    * Subscribe to changes at a path
    */
   subscribe(path, callback) {
+    if (this.isShuttingDown) {
+      throw new Error("Cannot subscribe during shutdown");
+    }
+
     if (!this.subscriptions.has(path)) {
       this.subscriptions.set(path, new Set());
     }
@@ -247,6 +331,13 @@ class SyncManager {
    * Notify subscribers when data changes
    */
   notifySubscribers(path, value) {
+    if (this.isShuttingDown) {
+      console.log(
+        `Skipping subscriber notifications during shutdown for ${path}`
+      );
+      return;
+    }
+
     console.log(`Checking subscriptions for ${path}`);
 
     // Process both exact and prefix matches
@@ -310,6 +401,12 @@ class SyncManager {
    * This helps ensure consistency across nodes even for missed updates
    */
   async runAntiEntropy() {
+    // Don't run anti-entropy if we're shutting down
+    if (this.isShuttingDown) {
+      console.log("Skipping anti-entropy synchronization during shutdown");
+      return;
+    }
+
     console.log("Starting anti-entropy synchronization");
 
     try {
@@ -320,47 +417,64 @@ class SyncManager {
         return;
       }
 
-      // Select a random peer
-      const randomPeer = peers[Math.floor(Math.random() * peers.length)];
-      const socket = this.server.socketManager.sockets[randomPeer];
+      // Instead of selecting just one random peer, connect with multiple peers
+      // This ensures more complete synchronization
+      const peersToSync = Math.min(peers.length, 3); // Sync with up to 3 peers
+      const selectedPeers = [];
 
-      if (!socket || !socket.connected) {
-        console.log(
-          `Selected peer ${randomPeer} is not connected, skipping anti-entropy`
-        );
-        return;
-      }
+      // Select peers randomly without repeating
+      while (selectedPeers.length < peersToSync && peers.length > 0) {
+        const randomIndex = Math.floor(Math.random() * peers.length);
+        const peer = peers[randomIndex];
+        peers.splice(randomIndex, 1); // Remove selected peer from list
 
-      console.log(`Running anti-entropy with peer ${randomPeer}`);
-
-      // Request peer's vector clock
-      // (This would need a new message type in the socket protocol)
-      // socket.emit("getVectorClock", { requestId: requestId });
-
-      // For now, we'll implement a simpler version:
-      // Scan our database for recent changes and send them to the peer
-      const recentChanges = await this.getRecentChanges();
-
-      for (const change of recentChanges) {
-        const syncData = {
-          path: change.path,
-          value: change.value,
-          timestamp: change.timestamp,
-          origin: change.origin,
-          vectorClock: change.vectorClock,
-          msgId: `anti-entropy-${Date.now()}-${Math.random()
-            .toString(36)
-            .substr(2, 9)}`,
-          forwarded: true,
-        };
-
-        // Send directly to the selected peer
-        socket.emit("put", syncData);
+        const socket = this.server.socketManager.sockets[peer];
+        if (socket && socket.connected) {
+          selectedPeers.push(peer);
+        }
       }
 
       console.log(
-        `Sent ${recentChanges.length} changes to peer ${randomPeer} for anti-entropy`
+        `Running anti-entropy with ${
+          selectedPeers.length
+        } peers: ${selectedPeers.join(", ")}`
       );
+
+      // Get recent changes to share
+      const recentChanges = await this.getRecentChanges();
+      console.log(`Found ${recentChanges.length} recent changes to sync`);
+
+      // Send changes to each selected peer
+      for (const peer of selectedPeers) {
+        const socket = this.server.socketManager.sockets[peer];
+
+        if (!socket || !socket.connected) {
+          console.log(`Selected peer ${peer} is not connected, skipping`);
+          continue;
+        }
+
+        for (const change of recentChanges) {
+          const syncData = {
+            path: change.path,
+            value: change.value,
+            timestamp: change.timestamp,
+            origin: change.origin,
+            vectorClock: change.vectorClock,
+            msgId: `anti-entropy-${Date.now()}-${Math.random()
+              .toString(36)
+              .substr(2, 9)}`,
+            forwarded: true,
+            antiEntropy: true, // Mark as anti-entropy sync message
+          };
+
+          // Send directly to the selected peer
+          socket.emit("put", syncData);
+        }
+
+        console.log(
+          `Sent ${recentChanges.length} changes to peer ${peer} for anti-entropy`
+        );
+      }
     } catch (error) {
       console.error("Error during anti-entropy synchronization:", error);
     }
@@ -375,11 +489,12 @@ class SyncManager {
       // For now, we'll scan the entire database
       const allData = await this.server.db.scan("");
 
-      // Filter and limit to changes in last hour
-      const oneHourAgo = Date.now() - 3600000;
-      return allData.filter((item) => item.timestamp > oneHourAgo);
+      // Instead of just filtering on time, return all data
+      // This ensures complete synchronization
+      // For large databases, you might want to filter but for consistency tests we want all data
+      return allData;
     } catch (error) {
-      console.error("Error getting recent changes:", error);
+      console.error("Error getting changes for anti-entropy:", error);
       return [];
     }
   }
@@ -388,6 +503,8 @@ class SyncManager {
    * Clean up old processed messages to prevent memory leaks
    */
   cleanupProcessedMessages() {
+    if (this.isShuttingDown) return;
+
     const now = Date.now();
     let removedCount = 0;
 

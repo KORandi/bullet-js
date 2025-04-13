@@ -1,6 +1,7 @@
 /**
  * VectorClock implementation for P2P Server
  * Used for tracking causal relationships between updates
+ * This enhanced version ensures proper clock synchronization
  */
 
 class VectorClock {
@@ -47,27 +48,43 @@ class VectorClock {
    *  -1 if this clock is causally BEFORE other clock
    *   0 if this clock is CONCURRENT with other clock
    *   1 if this clock is causally AFTER other clock
+   *   2 if this clock is IDENTICAL to other clock
    */
   compare(otherClock) {
     let lessThan = false;
     let greaterThan = false;
+    let totalEntries = 0;
+    let equalEntries = 0;
 
     // Check all entries in this clock
     for (const [nodeId, count] of Object.entries(this.clock)) {
       const otherCount = otherClock.clock[nodeId] || 0;
+      totalEntries++;
 
       if (count < otherCount) {
         lessThan = true;
       } else if (count > otherCount) {
         greaterThan = true;
+      } else {
+        equalEntries++;
       }
     }
 
     // Check for entries in other clock that aren't in this one
     for (const [nodeId, count] of Object.entries(otherClock.clock)) {
-      if (!(nodeId in this.clock) && count > 0) {
-        lessThan = true;
+      if (!(nodeId in this.clock)) {
+        totalEntries++;
+        if (count > 0) {
+          lessThan = true;
+        } else {
+          equalEntries++;
+        }
       }
+    }
+
+    // If all entries are equal, the clocks are identical
+    if (equalEntries === totalEntries) {
+      return 2; // IDENTICAL
     }
 
     // Determine the relationship
@@ -75,10 +92,8 @@ class VectorClock {
       return -1; // This clock is causally BEFORE other clock
     } else if (greaterThan && !lessThan) {
       return 1; // This clock is causally AFTER other clock
-    } else if (lessThan && greaterThan) {
-      return 0; // Clocks are CONCURRENT (conflict)
     } else {
-      return 2; // Clocks are IDENTICAL
+      return 0; // Clocks are CONCURRENT (conflict)
     }
   }
 

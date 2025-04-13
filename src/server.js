@@ -20,6 +20,7 @@ class P2PServer {
     this.serverID = randomBytes(8).toString("hex");
     this.syncOptions = options.sync || {};
     this.conflictOptions = options.conflict || {};
+    this.isShuttingDown = false;
 
     // Initialize Express and HTTP server
     this.app = express();
@@ -35,7 +36,7 @@ class P2PServer {
     this.db = new DatabaseManager(this.dbPath);
     this.socketManager = new SocketManager(this);
 
-    // Initialize the  sync manager with conflict resolution
+    // Initialize the sync manager with conflict resolution
     this.syncManager = new SyncManager(this, {
       maxMessageAge: this.syncOptions.maxMessageAge || 300000,
       maxVersions: this.syncOptions.maxVersions || 10,
@@ -177,6 +178,10 @@ class P2PServer {
    * Public API: Put data with vector clock
    */
   async put(path, value) {
+    if (this.isShuttingDown) {
+      throw new Error("Server is shutting down, cannot accept new data");
+    }
+
     const timestamp = Date.now();
     const msgId = randomBytes(16).toString("hex");
 
@@ -243,6 +248,10 @@ class P2PServer {
    */
   async del(path) {
     try {
+      if (this.isShuttingDown) {
+        throw new Error("Server is shutting down, cannot delete data");
+      }
+
       // Check if the path exists first
       const exists = await this.get(path);
 
@@ -263,6 +272,11 @@ class P2PServer {
    * Public API: Subscribe to changes
    */
   async subscribe(path, callback) {
+    if (this.isShuttingDown) {
+      throw new Error(
+        "Server is shutting down, cannot accept new subscriptions"
+      );
+    }
     return this.syncManager.subscribe(path, callback);
   }
 
@@ -298,6 +312,10 @@ class P2PServer {
    * Force anti-entropy synchronization
    */
   async runAntiEntropy() {
+    if (this.isShuttingDown) {
+      console.log("Skipping anti-entropy during shutdown");
+      return;
+    }
     return this.syncManager.runAntiEntropy();
   }
 
@@ -305,21 +323,57 @@ class P2PServer {
    * Close the server and database
    */
   async close() {
-    return new Promise((resolve, reject) => {
-      this.server.close(async (err) => {
-        if (err) {
-          console.error("Error closing HTTP server:", err);
-        }
+    // Mark as shutting down to prevent new operations
+    this.isShuttingDown = true;
+    console.log(`Server ${this.serverID} beginning shutdown process`);
 
+    return new Promise((resolve, reject) => {
+      // First stop sync manager's intervals
+      if (this.syncManager) {
+        this.syncManager.prepareForShutdown();
+        console.log(`Server ${this.serverID} stopped sync manager intervals`);
+      }
+
+      // Close socket connections
+      if (this.socketManager) {
         try {
-          await this.db.close();
-          console.log("Database closed");
-          resolve();
-        } catch (dbErr) {
-          console.error("Error closing database:", dbErr);
-          reject(dbErr);
+          this.socketManager.closeAllConnections();
+          console.log(`Server ${this.serverID} closed socket connections`);
+        } catch (socketErr) {
+          console.error(
+            `Server ${this.serverID} error closing sockets:`,
+            socketErr
+          );
         }
-      });
+      }
+
+      // Give a small pause for sockets to fully disconnect
+      setTimeout(() => {
+        // Close HTTP server
+        this.server.close(async (err) => {
+          if (err) {
+            console.error(
+              `Server ${this.serverID} error closing HTTP server:`,
+              err
+            );
+          } else {
+            console.log(`Server ${this.serverID} HTTP server closed`);
+          }
+
+          try {
+            // Finally close the database
+            await this.db.close();
+            console.log(`Server ${this.serverID} database closed`);
+            resolve();
+          } catch (dbErr) {
+            console.error(
+              `Server ${this.serverID} error closing database:`,
+              dbErr
+            );
+            reject(dbErr);
+          }
+        });
+      }, 500); // Short delay to allow sockets to disconnect
     });
   }
 }

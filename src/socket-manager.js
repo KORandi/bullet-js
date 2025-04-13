@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 /**
  * SocketManager for P2P Server
- * Improves peer tracking and message broadcasting
+ * Improves peer tracking and message broadcasting with proper shutdown support
  */
 
 const socketIO = require("socket.io");
@@ -16,6 +16,8 @@ class SocketManager {
     this.peerIdToUrl = {}; // Map of peerID -> url
     this.io = null;
     this.myUrl = null;
+    this.isShuttingDown = false;
+    this.peerSockets = []; // Store client socket connections
   }
 
   /**
@@ -26,6 +28,13 @@ class SocketManager {
     this.myUrl = `http://localhost:${this.server.port}`;
 
     this.io.on("connection", (socket) => {
+      // Don't accept new connections if shutting down
+      if (this.isShuttingDown) {
+        console.log(`Rejecting new connection during shutdown: ${socket.id}`);
+        socket.disconnect(true);
+        return;
+      }
+
       console.log(`New connection from: ${socket.id}`);
 
       socket.on("identify", (data) => {
@@ -54,6 +63,12 @@ class SocketManager {
       });
 
       socket.on("put", (data) => {
+        // Ignore if shutting down
+        if (this.isShuttingDown) {
+          console.log("Ignoring put message during shutdown");
+          return;
+        }
+
         console.log(`Received put from socket ${socket.id} for ${data.path}`);
 
         // Try to determine the peer ID
@@ -118,6 +133,14 @@ class SocketManager {
    * Connect to known peers
    */
   connectToPeers(peerURLs) {
+    // Don't connect to peers if shutting down
+    if (this.isShuttingDown) {
+      console.log("Skipping peer connections during shutdown");
+      return;
+    }
+
+    this.peerSockets = []; // Store socket references for cleanup
+
     peerURLs.forEach((url) => {
       try {
         // Skip self connections
@@ -128,6 +151,9 @@ class SocketManager {
 
         console.log(`Attempting to connect to peer: ${url}`);
         const socket = ioClient(url);
+
+        // Store for cleanup
+        this.peerSockets.push(socket);
 
         // Store socket by URL immediately
         this.socketsByUrl[url] = socket;
@@ -158,6 +184,9 @@ class SocketManager {
         });
 
         socket.on("put", (data) => {
+          // Ignore if shutting down
+          if (this.isShuttingDown) return;
+
           console.log(`Received put from peer ${url} for ${data.path}`);
 
           // Add sender info
@@ -181,9 +210,72 @@ class SocketManager {
   }
 
   /**
+   * Close all socket connections properly
+   */
+  closeAllConnections() {
+    this.isShuttingDown = true;
+    console.log("Closing all socket connections");
+
+    // Close server-side socket.io instance
+    if (this.io) {
+      try {
+        this.io.close();
+        console.log("Closed server socket.io instance");
+      } catch (err) {
+        console.error("Error closing socket.io server:", err);
+      }
+    }
+
+    // Close all outgoing connections by URL
+    if (this.peerSockets && this.peerSockets.length > 0) {
+      console.log(`Disconnecting ${this.peerSockets.length} socket.io clients`);
+      for (const socket of this.peerSockets) {
+        try {
+          if (socket) {
+            socket.disconnect();
+            socket.close();
+            socket.removeAllListeners();
+          }
+        } catch (err) {
+          console.error(`Error disconnecting socket:`, err);
+        }
+      }
+      this.peerSockets = [];
+    }
+
+    // Close any remaining sockets by URL
+    for (const [url, socket] of Object.entries(this.socketsByUrl)) {
+      try {
+        if (socket && socket.connected) {
+          socket.disconnect();
+          socket.close();
+          socket.removeAllListeners();
+          console.log(`Disconnected from peer: ${url}`);
+        }
+      } catch (err) {
+        console.error(`Error disconnecting from ${url}:`, err);
+      }
+    }
+
+    // Clear all socket collections
+    this.sockets = {};
+    this.socketsByUrl = {};
+    this.urlToPeerId = {};
+    this.peerIdToUrl = {};
+
+    console.log("All socket connections closed");
+  }
+
+  /**
    * Improved broadcast to use both ID and URL mappings with forwarding
    */
   broadcast(event, data) {
+    // Skip broadcasting if shutting down
+    if (this.isShuttingDown) {
+      console.log("Skipping broadcast during shutdown");
+      return 0;
+    }
+
     // Get all connected peers, filter out ourselves
     const idPeers = Object.keys(this.sockets).filter(
       (id) => id !== this.server.serverID

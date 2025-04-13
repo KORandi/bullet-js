@@ -4,7 +4,7 @@
  * with log output saved to a file
  */
 
-const P2PServer = require("./src/server");
+const P2PServer = require("../src/server");
 const fs = require("fs");
 const rimraf = require("rimraf");
 
