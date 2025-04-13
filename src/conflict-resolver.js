@@ -120,9 +120,7 @@ class ConflictResolver {
       typeof localData.value !== "object" ||
       typeof remoteData.value !== "object" ||
       localData.value === null ||
-      remoteData.value === null ||
-      Array.isArray(localData.value) ||
-      Array.isArray(remoteData.value)
+      remoteData.value === null
     ) {
       // If not objects, fall back to last-write-wins
       console.log(
@@ -131,32 +129,21 @@ class ConflictResolver {
       return this.lastWriteWins(localData, remoteData);
     }
 
-    // Start with a completely new result object
+    // Create a new result object based on the newer data's metadata
     const result = {
-      ...localData, // Copy metadata from local data
-      value: {}, // Start with empty object for values
+      ...(localData.timestamp >= remoteData.timestamp ? localData : remoteData),
+      value: {}, // Start with empty value
     };
 
-    // Track field-level timestamps for decision making
-    const fieldTimestamps = {};
+    // Simple approach - copy all fields from both objects
+    // First copy all fields from the first object
+    Object.assign(result.value, localData.value);
 
-    // First, add all fields from local data with their timestamps
-    for (const key in localData.value) {
-      result.value[key] = localData.value[key];
-      fieldTimestamps[key] = localData.timestamp;
-    }
+    // Then copy all fields from the second object
+    // This will overwrite fields that exist in both with the second object's values
+    Object.assign(result.value, remoteData.value);
 
-    // Then, process fields from remote data
-    for (const key in remoteData.value) {
-      // If field doesn't exist locally or remote has a newer timestamp
-      if (
-        !(key in result.value) || // Field doesn't exist locally
-        remoteData.timestamp > fieldTimestamps[key] // Remote is newer
-      ) {
-        result.value[key] = remoteData.value[key];
-        fieldTimestamps[key] = remoteData.timestamp;
-      }
-    }
+    console.log(`Merged result:`, JSON.stringify(result.value));
 
     // Merge vector clocks (if available)
     if (localData.vectorClock && remoteData.vectorClock) {
@@ -170,10 +157,8 @@ class ConflictResolver {
           localData.vectorClock
         );
       } else {
-        // Both are plain objects, manually merge
+        // Manual merge of vector clocks
         result.vectorClock = { ...localData.vectorClock };
-
-        // Add/update with values from remote clock
         for (const nodeId in remoteData.vectorClock) {
           const localCount = result.vectorClock[nodeId] || 0;
           const remoteCount = remoteData.vectorClock[nodeId];
@@ -184,8 +169,6 @@ class ConflictResolver {
 
     // Use the latest timestamp
     result.timestamp = Math.max(localData.timestamp, remoteData.timestamp);
-
-    console.log(`Merged result:`, JSON.stringify(result.value));
 
     return result;
   }

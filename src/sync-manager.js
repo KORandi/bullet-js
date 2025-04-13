@@ -242,6 +242,7 @@ class SyncManager {
   /**
    * Handle PUT operations with conflict resolution
    */
+  // Inside the SyncManager class, handlePut method:
   async handlePut(data) {
     // Skip if shutting down
     if (this.isShuttingDown) {
@@ -312,24 +313,50 @@ class SyncManager {
         // Compare vector clocks to detect conflicts
         const comparison = existingVectorClock.compare(incomingVectorClock);
 
+        // Get the strategy for this path
+        const strategy = this.conflictResolver.getStrategyForPath(data.path);
+
         // Handle based on comparison result
         if (comparison === -1) {
-          // Existing data is causally before new data, accept new data
+          // Existing data is causally before new data
           console.log(
-            `Update for ${data.path} is newer (vector clock), accepting`
+            `Update for ${data.path} is newer (vector clock), checking for merge opportunity`
           );
-          finalData = newData;
-        } else if (comparison === 1) {
-          // Existing data is causally after new data, keep existing
-          console.log(
-            `Update for ${data.path} is older (vector clock), ignoring`
-          );
-          finalData = existingData;
-        } else if (comparison === 0) {
-          // Concurrent updates, need to resolve conflict
-          console.log(`Detected concurrent update conflict for ${data.path}`);
 
-          // Use conflict resolver
+          // Check if this path should use field merging
+          const strategy = this.conflictResolver.getStrategyForPath(data.path);
+          if (
+            strategy === "merge-fields" &&
+            typeof existingData.value === "object" &&
+            typeof newData.value === "object"
+          ) {
+            // Use field merging even for newer updates to preserve fields
+            console.log(
+              `Using merge-fields for newer update to preserve fields from both objects`
+            );
+            finalData = this.conflictResolver.mergeFields(
+              data.path,
+              existingData,
+              newData
+            );
+          } else {
+            // For other strategies, just accept the newer data
+            finalData = newData;
+          }
+        } else {
+          // Comparison is 0 (concurrent) or 2 (identical) - use conflict resolution
+          if (comparison === 0) {
+            console.log(`Detected concurrent update conflict for ${data.path}`);
+          } else {
+            console.log(
+              `Identical vector clocks for ${data.path}, using conflict resolution`
+            );
+          }
+
+          // Apply conflict resolution strategy based on path
+          console.log(
+            `Resolving conflict for ${data.path} using ${strategy} strategy`
+          );
           const resolvedData = this.conflictResolver.resolve(
             data.path,
             localData,
@@ -350,23 +377,6 @@ class SyncManager {
           finalData = resolvedData;
 
           console.log(`Conflict resolution complete for ${data.path}`);
-        } else {
-          // Identical vector clocks, use timestamp as tiebreaker
-          const strategy = this.conflictResolver.getStrategyForPath(data.path);
-          if (strategy === "first-write-wins") {
-            console.log(
-              `Identical vector clocks, using first-write-wins for ${data.path}`
-            );
-            finalData =
-              data.timestamp < existingData.timestamp ? newData : existingData;
-          } else {
-            // Default to last-write-wins for identical vector clocks
-            console.log(
-              `Identical vector clocks, using last-write-wins for ${data.path}`
-            );
-            finalData =
-              data.timestamp > existingData.timestamp ? newData : existingData;
-          }
         }
 
         // Add to version history
