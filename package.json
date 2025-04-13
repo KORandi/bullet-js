@@ -1,0 +1,29 @@
+{
+  "name": "p2p-server-sync",
+  "version": "1.0.0",
+  "description": "P2P Server with LevelDB and synchronization similar",
+  "main": "index.js",
+  "scripts": {
+    "start": "node example.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "p2p",
+    "socket.io",
+    "leveldb",
+    "database",
+    "synchronization",
+    "gun.js"
+  ],
+  "author": "KORandi",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "level": "^9.0.0",
+    "socket.io": "^4.7.2",
+    "socket.io-client": "^4.7.2"
+  },
+  "devDependencies": {
+    "rimraf": "^5.0.10"
+  }
+}
