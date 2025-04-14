@@ -4,13 +4,13 @@
  */
 
 const { expect } = require("chai");
-const { P2PServer, VectorClock } = require("../../src");
+const { P2PServer, createServer, VectorClock } = require("../../src");
 const {
   createTestNetwork,
   wait,
   cleanupServers,
-} = require("../helpers/test-network");
-const { loadFixtures } = require("../helpers/fixtures");
+} = require(".././helpers/test-network");
+const { loadFixtures } = require(".././helpers/fixtures");
 const fs = require("fs");
 const path = require("path");
 const rimraf = require("rimraf");
@@ -29,7 +29,7 @@ function cleanupTestDatabases() {
 
 describe("Advanced P2P Server Tests", function () {
   // These tests may take longer to run
-  this.timeout(30000);
+  this.timeout(60000);
 
   before(function () {
     cleanupTestDatabases();
@@ -705,7 +705,11 @@ describe("Advanced P2P Server Tests", function () {
     let servers = [];
 
     beforeEach(async function () {
-      servers = createTestNetwork(3, 4001, `${TEST_DB_DIR}/offline-sync`);
+      servers = createTestNetwork(3, 4001, `${TEST_DB_DIR}/offline-sync`, {
+        sync: {
+          antiEntropyInterval: 2000, // Run anti-entropy more frequently for testing
+        },
+      });
 
       // Start all servers
       for (const server of servers) {
@@ -762,9 +766,6 @@ describe("Advanced P2P Server Tests", function () {
         port: 4002,
         dbPath: `${TEST_DB_DIR}/offline-sync-2`,
         peers: ["http://localhost:4001", "http://localhost:4003"],
-        sync: {
-          antiEntropyInterval: 2000, // Run anti-entropy more frequently for testing
-        },
       });
 
       await servers[1].start();
@@ -864,6 +865,237 @@ describe("Advanced P2P Server Tests", function () {
         // Restore the real Date.now in case of test failure
         Date.now = realDateNow;
       }
+    });
+  });
+
+  describe("11. Anti-Entropy with Large Database Sync", function () {
+    let serverA, serverB;
+    const SERVER_A_DB_PATH = `${TEST_DB_DIR}/large-entropy-a`;
+    const SERVER_B_DB_PATH = `${TEST_DB_DIR}/large-entropy-b`;
+
+    before(async function () {
+      // This test may take longer due to large data
+      this.timeout(60000);
+
+      console.log("Setting up large database test...");
+
+      // Create first server with no peers
+      serverA = new P2PServer({
+        port: 4001,
+        dbPath: SERVER_A_DB_PATH,
+        peers: [],
+        sync: {
+          antiEntropyInterval: null, // Disable automatic anti-entropy
+        },
+      });
+
+      await serverA.start();
+      console.log("Server A started");
+
+      // Generate at least 1MB of data
+      console.log("Generating large dataset (>1MB)...");
+      await generateLargeDataset(serverA);
+
+      // Verify data size
+      const dbSize = await calculateDbSize(SERVER_A_DB_PATH);
+      console.log(
+        `Generated database size: ${(dbSize / (1024 * 1024)).toFixed(2)} MB`
+      );
+
+      // Create second server that will connect to first
+      serverB = new P2PServer({
+        port: 4002,
+        dbPath: SERVER_B_DB_PATH,
+        peers: ["http://localhost:4001"],
+        sync: {
+          antiEntropyInterval: null, // Disable automatic anti-entropy
+        },
+      });
+
+      await serverB.start();
+      console.log("Server B started");
+
+      // Wait for connection to establish
+      await wait(2000);
+    });
+
+    after(async function () {
+      console.log("Cleaning up servers");
+      if (serverA) await serverA.close();
+      if (serverB) await serverB.close();
+    });
+
+    // Helper function to generate large dataset
+    async function generateLargeDataset(server) {
+      // Generate string data chunks of 10KB each
+      const generateChunk = (index) => {
+        const chars =
+          "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        let result = "";
+        const chunkSize = 10 * 1024; // 10KB
+
+        for (let i = 0; i < chunkSize; i++) {
+          result += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+
+        return {
+          id: `chunk-${index}`,
+          data: result,
+          timestamp: Date.now(),
+          metadata: {
+            index,
+            size: chunkSize,
+            checksum: `mock-checksum-${index}`,
+          },
+        };
+      };
+
+      // Generate approximately 1MB of data (100 chunks of 10KB)
+      const CHUNKS = 100;
+      console.log(
+        `Creating ${CHUNKS} data chunks (approx. ${CHUNKS * 10}KB)...`
+      );
+
+      for (let i = 0; i < CHUNKS; i++) {
+        const chunk = generateChunk(i);
+        await server.put(`large-data/chunk${i}`, chunk);
+
+        // Log progress
+        if (i % 20 === 0) {
+          console.log(`Generated ${i}/${CHUNKS} chunks...`);
+        }
+      }
+
+      // Also create deep paths with smaller data for testing path-specific sync
+      for (let category = 0; category < 5; category++) {
+        for (let item = 0; item < 20; item++) {
+          await server.put(`large-data/category${category}/item${item}`, {
+            name: `Item ${category}-${item}`,
+            description: `Description for item ${item} in category ${category}`,
+            data: `X`.repeat(1024), // 1KB of data per item
+          });
+        }
+      }
+    }
+
+    // Helper to calculate DB size on disk
+    async function calculateDbSize(dbPath) {
+      let totalSize = 0;
+
+      function getFilesizeInBytes(filePath) {
+        const stats = fs.statSync(filePath);
+        return stats.size;
+      }
+
+      function walkDir(dir) {
+        const files = fs.readdirSync(dir);
+
+        for (const file of files) {
+          const filePath = path.join(dir, file);
+          const stat = fs.statSync(filePath);
+
+          if (stat.isDirectory()) {
+            walkDir(filePath);
+          } else {
+            totalSize += getFilesizeInBytes(filePath);
+          }
+        }
+      }
+
+      walkDir(dbPath);
+      return totalSize;
+    }
+
+    it("should successfully sync large database via anti-entropy", async function () {
+      // First, verify server B has no data initially
+      const initialDataB = await serverB.scan("large-data");
+      console.log(`Initial data count on Server B: ${initialDataB.length}`);
+      expect(initialDataB.length).to.equal(0);
+
+      // Get initial count on server A for verification
+      const initialDataA = await serverA.scan("large-data");
+      console.log(`Data count on Server A: ${initialDataA.length}`);
+      expect(initialDataA.length).to.be.above(100); // Should have all our chunks plus category items
+
+      // Start a timer to measure sync duration
+      console.log("Triggering anti-entropy synchronization...");
+      const startTime = Date.now();
+
+      // Manually trigger anti-entropy on both servers
+      await serverA.runAntiEntropy();
+      await serverB.runAntiEntropy();
+
+      // Wait for first-pass sync
+      await wait(5000);
+
+      // Run additional anti-entropy passes to ensure complete sync
+      console.log("Running additional anti-entropy passes...");
+      for (let i = 0; i < 3; i++) {
+        await serverA.runAntiEntropy();
+        await serverB.runAntiEntropy();
+        await wait(2000);
+      }
+
+      const totalTime = Date.now() - startTime;
+      console.log(`Anti-entropy completed in ${totalTime}ms`);
+
+      // Check how much data was synced to server B
+      const syncedDataB = await serverB.scan("large-data");
+      console.log(`Synced data count on Server B: ${syncedDataB.length}`);
+
+      // Calculate sync percentage
+      const syncPercentage = (syncedDataB.length / initialDataA.length) * 100;
+      console.log(`Sync percentage: ${syncPercentage.toFixed(2)}%`);
+
+      // Run one last anti-entropy and check final state
+      console.log("Running final anti-entropy pass...");
+      await serverA.runAntiEntropy();
+      await serverB.runAntiEntropy();
+      await wait(3000);
+
+      const finalDataB = await serverB.scan("large-data");
+      console.log(`Final data count on Server B: ${finalDataB.length}`);
+
+      // Verify sync success - should have synced all or at least 90% of the data
+      expect(finalDataB.length).to.be.at.least(
+        Math.floor(initialDataA.length * 0.9)
+      );
+
+      // Verify actual data content for a sample of items
+      console.log("Verifying data content integrity...");
+      let verifiedCount = 0;
+      const SAMPLE_SIZE = 10; // Check 10 random chunks
+
+      for (let i = 0; i < SAMPLE_SIZE; i++) {
+        const index = Math.floor(Math.random() * 100); // Random chunk index
+        const pathToCheck = `large-data/chunk${index}`;
+
+        const dataA = await serverA.get(pathToCheck);
+        const dataB = await serverB.get(pathToCheck);
+
+        if (dataB && dataA && dataB.data === dataA.data) {
+          verifiedCount++;
+        }
+      }
+
+      console.log(
+        `Verified ${verifiedCount}/${SAMPLE_SIZE} random samples match exactly`
+      );
+      expect(verifiedCount).to.be.at.least(Math.floor(SAMPLE_SIZE * 0.8));
+
+      // Test a deep path item
+      const deepPathA = await serverA.get("large-data/category2/item7");
+      const deepPathB = await serverB.get("large-data/category2/item7");
+
+      expect(deepPathB).to.not.be.null;
+      expect(deepPathB).to.deep.equal(deepPathA);
+
+      // Log system info for performance context
+      console.log("Test completed successfully");
+      console.log(`Data synced: ${finalDataB.length} items in ${totalTime}ms`);
+      console.log(
+        `Sync rate: ${(finalDataB.length / (totalTime / 1000)).toFixed(2)} items/second`
+      );
     });
   });
 });

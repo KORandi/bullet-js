@@ -124,6 +124,25 @@ function createValidator(validationFn, errorMessage) {
   };
 }
 
+function deepMerge(target: any, source: any): any {
+  const output = { ...target };
+  for (const key in source) {
+    if (
+      source[key] instanceof Object &&
+      key in target &&
+      target[key] instanceof Object
+    ) {
+      output[key] = deepMerge(target[key], source[key]);
+    } else {
+      output[key] = source[key];
+    }
+  }
+  return output;
+}
+
+const config = deepMerge(getDefaultConfig(), options);
+
+
 module.exports = {
   isValidPath,
   normalizePath,

@@ -16,6 +16,8 @@ const SocketManager = require("../network/socket-manager");
 // Import sync components
 const SyncManager = require("../sync/sync-manager");
 const { getDefaultConfig, validateConfig } = require("./config");
+const merge = require("deepmerge");
+const deepmerge = require("deepmerge");
 
 class P2PServer {
   /**
@@ -23,8 +25,7 @@ class P2PServer {
    * @param {Object} options - Server configuration options
    */
   constructor(options = {}) {
-    // Apply default config and validate
-    const config = { ...getDefaultConfig(), ...options };
+    const config = deepmerge(getDefaultConfig(), options);
     validateConfig(config);
 
     // Server identification and configuration
