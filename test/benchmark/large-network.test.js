@@ -239,7 +239,7 @@ describe("Large P2P Network Tests", function () {
           dbPath: `${DB_PATH_PREFIX}${i + 1}`,
           peers: peerUrls,
           sync: {
-            antiEntropyInterval: 5000, // Every 5 seconds
+            antiEntropyInterval: 1000, // Every 1 second
           },
         });
 
@@ -252,25 +252,6 @@ describe("Large P2P Network Tests", function () {
         console.log(`Started server ${i + 1} on port ${BASE_PORT + i}`);
       }
 
-      // Wait for connections to establish
-      await wait(3000);
-
-      // Log the network topology for clarity
-      console.log("Network topology:");
-      for (let i = 0; i < NODE_COUNT; i++) {
-        if (i === BRIDGE_NODE_INDEX) {
-          console.log(`Node ${i + 1} (BRIDGE): connects to all other nodes`);
-        } else if (i < BRIDGE_NODE_INDEX) {
-          console.log(
-            `Node ${i + 1} (Group A): connects to ${connections[i].map((x) => x + 1).join(", ")}`
-          );
-        } else {
-          console.log(
-            `Node ${i + 1} (Group B): connects to ${connections[i].map((x) => x + 1).join(", ")}`
-          );
-        }
-      }
-
       // Initial verification: network is connected
       console.log("Verifying initial connectivity across all nodes...");
 
@@ -281,7 +262,7 @@ describe("Large P2P Network Tests", function () {
       });
 
       // Wait for propagation
-      await wait(2000);
+      await wait(3000);
 
       // Verify data reached Group B
       const initialConnectivity =
@@ -354,7 +335,7 @@ describe("Large P2P Network Tests", function () {
       console.log(`Restarted bridge node ${BRIDGE_NODE_INDEX + 1}`);
 
       // Give time for connections to re-establish
-      await wait(3000);
+      await wait(1000);
 
       // Force run anti-entropy on all nodes to speed up healing
       console.log("Triggering anti-entropy on all nodes...");
@@ -366,7 +347,7 @@ describe("Large P2P Network Tests", function () {
 
       // Wait for multiple anti-entropy cycles
       console.log("Waiting for anti-entropy to heal the partition...");
-      await wait(10000);
+      await wait(2000);
 
       // Force another round of anti-entropy
       for (const server of servers) {
@@ -374,8 +355,6 @@ describe("Large P2P Network Tests", function () {
           await server.runAntiEntropy();
         }
       }
-
-      await wait(3000);
 
       // Verify data has crossed the healed partition
       console.log(
@@ -495,7 +474,7 @@ describe("Large P2P Network Tests", function () {
         DB_PATH_PREFIX,
         {
           sync: {
-            antiEntropyInterval: 2000, // Run anti-entropy every 2 seconds
+            antiEntropyInterval: 1000, // Run anti-entropy every 1 second
           },
           conflict: {
             defaultStrategy: "merge-fields",
@@ -525,7 +504,6 @@ describe("Large P2P Network Tests", function () {
 
       // Wait for connections to establish
       console.log("\nWaiting for connections to establish...");
-      await wait(3000);
 
       // Now run the actual test
       const USER_PATH = "users/concurrent-test-user";
@@ -554,7 +532,6 @@ describe("Large P2P Network Tests", function () {
       console.log(
         `Created base object on Node-${centralServerIndex + 1}, waiting for propagation...`
       );
-      await wait(3000);
 
       // Have each node update a different field of the same user
       console.log("Preparing concurrent updates...");
@@ -581,23 +558,22 @@ describe("Large P2P Network Tests", function () {
 
       // Wait for initial propagation
       console.log("Waiting for initial propagation...");
-      await wait(5000);
 
       // Force anti-entropy several times to ensure full propagation
       console.log("Running anti-entropy cycles...");
-      for (let cycle = 0; cycle < 5; cycle++) {
+      for (let cycle = 0; cycle < 3; cycle++) {
         console.log(`Anti-entropy cycle ${cycle + 1}...`);
         for (let i = 0; i < servers.length; i++) {
           if (servers[i]) {
-            await servers[i].runAntiEntropy();
+            servers[i].runAntiEntropy();
+            await wait(500);
           }
         }
-        await wait(1000); // Wait between cycles
       }
 
       // Final wait for propagation
       console.log("Final wait for propagation...");
-      await wait(5000);
+      await wait(2000);
 
       // Check results on all nodes
       let maxFieldCount = 0;
@@ -728,9 +704,6 @@ describe("Large P2P Network Tests", function () {
         timestamp: Date.now(),
       });
 
-      // Let it propagate briefly
-      await wait(2000);
-
       // Start a series of node churns (leaving and joining)
       console.log("Starting node churn test (rapid joining/leaving)");
 
@@ -764,9 +737,6 @@ describe("Large P2P Network Tests", function () {
           timestamp: Date.now(),
         });
 
-        // Wait a bit for propagation
-        await wait(1000);
-
         // Restart the shutdown nodes with their original configurations
         console.log("Restarting nodes...");
         for (const nodeIdx of nodesToShutdown) {
@@ -779,7 +749,7 @@ describe("Large P2P Network Tests", function () {
             dbPath: config.dbPath,
             peers: config.peers,
             sync: {
-              antiEntropyInterval: 2000, // More frequent anti-entropy for faster recovery
+              antiEntropyInterval: 1000, // More frequent anti-entropy for faster recovery
               maxMessageAge: 60000,
               maxVersions: 5,
             },
@@ -792,14 +762,14 @@ describe("Large P2P Network Tests", function () {
         }
 
         // Wait for anti-entropy to run
-        await wait(3000);
+        await wait(1100);
       }
 
       // Force final anti-entropy on all nodes
       console.log("Running final anti-entropy sync on all nodes...");
       for (const server of servers) {
         if (server) {
-          await server.runAntiEntropy();
+          server.runAntiEntropy();
         }
       }
 

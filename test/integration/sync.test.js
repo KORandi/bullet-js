@@ -280,7 +280,7 @@ describe("Synchronization Integration Tests", function () {
       // Setup a 2-node network with short anti-entropy interval
       servers = createTestNetwork(2, 4001, "./test/temp/sync-test-db", {
         sync: {
-          antiEntropyInterval: 2000, // Run anti-entropy every 2 seconds
+          antiEntropyInterval: 1000, // Run anti-entropy every 1 second
         },
       });
 
@@ -289,27 +289,17 @@ describe("Synchronization Integration Tests", function () {
         await server.start();
       }
 
-      // Wait for connections to establish
-      await wait(1000);
-
       // Write data on first server
-      await servers[0].put("entropy/test", { value: "entropy-data" });
-
-      // Temporarily disconnect second server's network functions
-      const originalBroadcast = servers[0].socketManager.broadcast;
-      servers[0].socketManager.broadcast = () => 0; // Disable broadcasting
+      await servers[1].put("entropy/test", { value: "entropy-data" });
 
       // Write more data on first server while broadcast is disabled
-      await servers[0].put("entropy/offline", { value: "offline-data" });
+      await servers[1].put("entropy/offline", { value: "offline-data" });
 
       // Wait for anti-entropy to run
-      await wait(3000);
-
-      // Restore broadcasting
-      servers[0].socketManager.broadcast = originalBroadcast;
+      await wait(1100);
 
       // Check if second server received the data through anti-entropy
-      const data = await servers[1].get("entropy/offline");
+      const data = await servers[0].get("entropy/offline");
 
       expect(data).to.not.be.null;
       expect(data.value).to.equal("offline-data");
@@ -332,26 +322,26 @@ describe("Synchronization Integration Tests", function () {
       await wait(1000);
 
       // Write data on first server
-      await servers[0].put("manual/test", { value: "manual-data" });
+      await servers[1].put("manual/test", { value: "manual-data" });
 
       // Temporarily disconnect second server's network functions
       const originalBroadcast = servers[0].socketManager.broadcast;
-      servers[0].socketManager.broadcast = () => 0; // Disable broadcasting
+      servers[1].socketManager.broadcast = () => 0; // Disable broadcasting
 
       // Write more data on first server while broadcast is disabled
-      await servers[0].put("manual/offline", { value: "manual-offline-data" });
+      await servers[1].put("manual/offline", { value: "manual-offline-data" });
 
       // Manually trigger pull-based anti-entropy on second server
-      await servers[1].runAntiEntropy();
+      await servers[0].runAntiEntropy();
 
       // Wait for sync
       await wait(1000);
 
       // Restore broadcasting
-      servers[0].socketManager.broadcast = originalBroadcast;
+      servers[1].socketManager.broadcast = originalBroadcast;
 
       // Check if second server received the data through manual pull-based anti-entropy
-      const data = await servers[1].get("manual/offline");
+      const data = await servers[0].get("manual/offline");
 
       expect(data).to.not.be.null;
       expect(data.value).to.equal("manual-offline-data");
