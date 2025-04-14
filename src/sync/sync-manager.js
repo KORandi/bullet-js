@@ -26,7 +26,6 @@ class SyncManager {
     // Initialize configuration
     this.maxMessageAge = syncOptions.maxMessageAge || 300000; // 5 minutes
     this.maxVersions = syncOptions.maxVersions || 10;
-    this.debugMode = syncOptions.debugMode || false;
 
     // Initialize components
     this.vectorClock = new VectorClock();
@@ -120,9 +119,6 @@ class SyncManager {
 
     // Skip already processed messages
     if (data.msgId && this.processedMessages.has(data.msgId)) {
-      if (this.debugMode) {
-        console.log(`Already processed message ${data.msgId}, skipping`);
-      }
       return null;
     }
 
@@ -131,11 +127,6 @@ class SyncManager {
       Array.isArray(data.visitedServers) &&
       data.visitedServers.includes(this.server.serverID)
     ) {
-      if (this.debugMode) {
-        console.log(
-          `Already visited server ${this.server.serverID}, skipping to prevent loops`
-        );
-      }
       return null;
     }
 
@@ -580,12 +571,6 @@ class SyncManager {
         this.messageTimestamps.delete(msgId);
         removedCount++;
       }
-    }
-
-    if (removedCount > 0 && this.debugMode) {
-      console.log(
-        `Cleaned up ${removedCount} old messages, ${this.processedMessages.size} remaining`
-      );
     }
   }
 

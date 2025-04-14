@@ -69,7 +69,6 @@ describe("Large P2P Network Tests", function () {
           antiEntropyInterval: 5000, // Run anti-entropy every 5 seconds
           maxMessageAge: 60000, // Keep messages for 1 minute
           maxVersions: 5, // Keep 5 versions in history
-          debugMode: false, // Disable verbose logging
         },
         conflict: {
           defaultStrategy: "last-write-wins",

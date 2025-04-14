@@ -193,12 +193,6 @@ class AntiEntropy {
           syncManager.vectorClock.clock[nodeId] = 0;
         }
       }
-
-      if (syncManager.debugMode && syncCount > 0) {
-        console.log(
-          `Sent vector clock sync to ${syncCount} peers: ${syncManager.vectorClock.toString()}`
-        );
-      }
     } catch (error) {
       console.error("Error synchronizing vector clocks:", error);
     }
@@ -403,14 +397,6 @@ class AntiEntropy {
         }
       }
 
-      if (syncManager.debugMode) {
-        console.log(
-          `Received vector clock sync from ${
-            data.nodeId
-          }, merged to: ${syncManager.vectorClock.toString()}`
-        );
-      }
-
       // Send our merged clock back to help convergence
       const responseMessage = {
         type: "vector-clock-sync-response",
@@ -462,14 +448,6 @@ class AntiEntropy {
         if (!(nodeId in syncManager.vectorClock.clock)) {
           syncManager.vectorClock.clock[nodeId] = 0;
         }
-      }
-
-      if (syncManager.debugMode) {
-        console.log(
-          `Received vector clock sync response from ${
-            data.nodeId
-          }, merged to: ${syncManager.vectorClock.toString()}`
-        );
       }
     } catch (error) {
       console.error("Error handling vector clock sync response:", error);

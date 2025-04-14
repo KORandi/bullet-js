@@ -16,10 +16,9 @@ function getDefaultConfig() {
 
     // Sync configuration
     sync: {
-      antiEntropyInterval: 60000, // 1 minute
+      antiEntropyInterval: null, // null or time in ms
       maxMessageAge: 300000, // 5 minutes
       maxVersions: 10,
-      debugMode: false,
     },
 
     // Conflict resolution configuration
