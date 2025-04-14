@@ -267,6 +267,18 @@ class P2PServer {
       }
     });
   }
+
+  /**
+   * Event listener when new socket identifies
+   * @param {(socket: Object) => void} callback
+   */
+  onSocketConnect(callback) {
+    this.socketManager.io.on("connection", (socket) => {
+      socket.on("identify", () => {
+        callback(socket);
+      });
+    });
+  }
 }
 
 module.exports = P2PServer;

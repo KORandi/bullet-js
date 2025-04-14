@@ -141,9 +141,7 @@ app.delete("/api/card/:uid", async (req, res) => {
 // After load we listen to socket to "identify" and then we synch our data
 (async () => {
   await p2p.start();
-  p2p.socketManager.io.on("connection", (socket) => {
-    socket.on("identify", () => {
-      p2p.runAntiEntropy();
-    });
+  p2p.onSocketConnect(() => {
+    p2p.runAntiEntropy();
   });
 })();
