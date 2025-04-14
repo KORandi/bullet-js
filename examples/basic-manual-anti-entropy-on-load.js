@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 require("dotenv").config();
-const { P2PServer } = require("p2p-server-sync");
+const { P2PServer } = require("../src");
 const cors = require("cors");
 
 const port = parseInt(process.env.PORT, 10) || 3000;

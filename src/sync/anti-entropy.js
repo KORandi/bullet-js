@@ -15,9 +15,10 @@ class AntiEntropy {
 
   /**
    * Run anti-entropy synchronization with peers
+   * @param {string} path - Data path or prefix
    * @returns {Promise<void>}
    */
-  async run() {
+  async run(path = "") {
     const syncManager = this.syncManager;
     const server = syncManager.server;
 
@@ -56,7 +57,7 @@ class AntiEntropy {
       await this._syncVectorClocksWithPeers(selectedPeers, batchId);
 
       // Request data from peers instead of pushing
-      await this._requestDataFromPeers(selectedPeers, batchId);
+      await this._requestDataFromPeers(selectedPeers, batchId, path);
 
       // Run final vector clock sync
       await this.synchronizeVectorClocks();
@@ -106,9 +107,10 @@ class AntiEntropy {
    * @private
    * @param {Array<string>} peers - Peer IDs
    * @param {string} batchId - Unique batch ID
+   * @param {string} path - Data path or prefix
    * @returns {Promise<void>}
    */
-  async _requestDataFromPeers(peers, batchId) {
+  async _requestDataFromPeers(peers, batchId, path) {
     const syncManager = this.syncManager;
     const server = syncManager.server;
 
@@ -131,15 +133,13 @@ class AntiEntropy {
         nodeId: server.serverID,
         vectorClock: syncManager.vectorClock.toJSON(),
         timestamp: Date.now(),
+        path: path,
       };
 
       // Send the data request to the peer
       console.log(`Requesting data from peer ${peer}`);
       socket.emit("anti-entropy-request", requestData);
     }
-
-    // Give peers time to respond
-    await new Promise((resolve) => setTimeout(resolve, 500));
   }
 
   /**
@@ -207,12 +207,13 @@ class AntiEntropy {
   /**
    * Get all data changes for responding to anti-entropy requests
    * @private
+   * @param {string} path - Data path or prefix
    * @returns {Promise<Array>} - List of changes
    */
-  async _getAllChanges() {
+  async _getAllChanges(path = "") {
     try {
       // Get all data from the database
-      return await this.syncManager.server.db.scan("");
+      return await this.syncManager.server.db.scan(path);
     } catch (error) {
       console.error("Error getting changes for anti-entropy:", error);
       return [];
@@ -223,6 +224,7 @@ class AntiEntropy {
    * Handle incoming anti-entropy data request
    * @param {Object} data - Request data
    * @param {Object} socket - Socket.IO socket
+   * @param {string} path - Data path or prefix
    * @returns {Promise<void>}
    */
   async handleAntiEntropyRequest(data, socket) {
@@ -239,6 +241,8 @@ class AntiEntropy {
         return;
       }
 
+      const path = data.path || "";
+
       console.log(`Received anti-entropy request from ${data.nodeId}`);
 
       // Add the requesting node to known nodes
@@ -253,7 +257,7 @@ class AntiEntropy {
       syncManager.vectorClock = syncManager.vectorClock.merge(requesterClock);
 
       // Get all our data to send back
-      const allChanges = await this._getAllChanges();
+      const allChanges = await this._getAllChanges(path);
       console.log(
         `Sending ${allChanges.length} changes in response to anti-entropy request`
       );

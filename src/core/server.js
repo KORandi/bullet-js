@@ -214,15 +214,16 @@ class P2PServer {
 
   /**
    * Run anti-entropy synchronization
+   * @param {string} path - Data path or prefix
    * @returns {Promise<void>}
    */
-  async runAntiEntropy() {
+  async runAntiEntropy(path = "") {
     if (this.isShuttingDown) {
       console.log("Skipping anti-entropy during shutdown");
       return;
     }
 
-    return this.syncManager.runAntiEntropy();
+    return this.syncManager.runAntiEntropy(path);
   }
 
   /**

@@ -522,15 +522,16 @@ class SyncManager {
 
   /**
    * Run anti-entropy synchronization
+   * @param {string} path - Data path or prefix
    * @returns {Promise<void>}
    */
-  async runAntiEntropy() {
+  async runAntiEntropy(path = "") {
     if (this.isShuttingDown) {
       console.log("Skipping anti-entropy synchronization during shutdown");
       return;
     }
 
-    return this.antiEntropy.run();
+    return this.antiEntropy.run(path);
   }
 
   /**
