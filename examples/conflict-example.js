@@ -50,6 +50,17 @@ async function runExample() {
       (path, localData, remoteData) => {
         console.log("Applying custom conflict resolution for inventory");
 
+        // Convert to VectorClock instances for comparison
+        const localClock =
+          localData.vectorClock instanceof VectorClock
+            ? localData.vectorClock
+            : new VectorClock(localData.vectorClock || {});
+
+        const remoteClock =
+          remoteData.vectorClock instanceof VectorClock
+            ? remoteData.vectorClock
+            : new VectorClock(remoteData.vectorClock || {});
+
         // For inventory items, take the minimum stock level for safety
         if (
           localData.value &&
@@ -57,11 +68,28 @@ async function runExample() {
           typeof localData.value.stock === "number" &&
           typeof remoteData.value.stock === "number"
         ) {
-          // Take the item with the newer timestamp as base
-          const result =
-            localData.timestamp >= remoteData.timestamp
-              ? { ...localData }
-              : { ...remoteData };
+          // Determine the clock relationship
+          const relation = localClock.dominanceRelation(remoteClock);
+
+          // Determine base item (for all fields except stock)
+          let result;
+
+          if (relation === "dominates" || relation === "identical") {
+            // Local data dominates, use it as base
+            result = { ...localData };
+          } else if (relation === "dominated") {
+            // Remote data dominates, use it as base
+            result = { ...remoteData };
+          } else {
+            // Concurrent updates, use deterministic tiebreaker
+            const winner = localClock.deterministicWinner(
+              remoteClock,
+              localData.origin || "",
+              remoteData.origin || ""
+            );
+
+            result = winner === "this" ? { ...localData } : { ...remoteData };
+          }
 
           // But always use the minimum stock level
           const minStock = Math.min(
@@ -70,14 +98,17 @@ async function runExample() {
           );
           result.value = { ...result.value, stock: minStock };
 
+          // Always merge the vector clocks
+          result.vectorClock = localClock.merge(remoteClock).toJSON();
+
           console.log(`Custom resolver: using minimum stock of ${minStock}`);
           return result;
         }
 
-        // Fall back to last-write-wins if not inventory items with stock
-        return localData.timestamp >= remoteData.timestamp
-          ? localData
-          : remoteData;
+        // Fall back to standard vector clock resolution if not inventory items with stock
+        return localClock.dominanceRelation(remoteClock) === "dominated"
+          ? remoteData
+          : localData;
       }
     );
 

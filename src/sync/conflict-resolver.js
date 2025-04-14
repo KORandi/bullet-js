@@ -1,3 +1,5 @@
+const VectorClock = require("./vector-clock");
+
 /**
  * ConflictResolver - Handles resolution of concurrent updates
  * Implements various strategies for resolving conflicts between updates
@@ -7,13 +9,13 @@ class ConflictResolver {
   /**
    * Create a new ConflictResolver
    * @param {Object} options - Conflict resolution options
-   * @param {string} [options.defaultStrategy="last-write-wins"] - Default resolution strategy
+   * @param {string} [options.defaultStrategy="vector-dominance"] - Default resolution strategy
    * @param {Object} [options.pathStrategies={}] - Map of paths to strategies
    * @param {Object} [options.customResolvers={}] - Map of paths to custom resolver functions
    */
   constructor(options = {}) {
     // Default resolution strategy
-    this.defaultStrategy = options.defaultStrategy || "last-write-wins";
+    this.defaultStrategy = options.defaultStrategy || "vector-dominance";
 
     // Map of path prefixes to resolution strategies
     this.pathStrategies = options.pathStrategies || {};
@@ -25,8 +27,8 @@ class ConflictResolver {
   /**
    * Resolve a conflict between two versions
    * @param {string} path - The data path
-   * @param {Object} localData - Local data with value, vectorClock, timestamp
-   * @param {Object} remoteData - Remote data with value, vectorClock, timestamp
+   * @param {Object} localData - Local data with value, vectorClock
+   * @param {Object} remoteData - Remote data with value, vectorClock
    * @returns {Object} Resolved data
    */
   resolve(path, localData, remoteData) {
@@ -40,24 +42,25 @@ class ConflictResolver {
 
     // Apply the selected strategy
     switch (strategy) {
-      case "last-write-wins":
-        return this._lastWriteWins(localData, remoteData);
+      case "vector-dominance":
+      case "last-write-wins": // Map legacy strategy to vector-dominance
+        return this._vectorDominance(localData, remoteData);
 
       case "first-write-wins":
         return this._firstWriteWins(localData, remoteData);
 
       case "merge-fields":
-        return this.mergeFields(path, localData, remoteData);
+        return this._mergeFields(path, localData, remoteData);
 
       case "custom":
         return this._applyCustomResolver(path, localData, remoteData);
 
       default:
-        // Fallback to last-write-wins
+        // Fallback to vector dominance
         console.log(
-          `Unknown strategy "${strategy}", falling back to last-write-wins`
+          `Unknown strategy "${strategy}", falling back to vector-dominance`
         );
-        return this._lastWriteWins(localData, remoteData);
+        return this._vectorDominance(localData, remoteData);
     }
   }
 
@@ -66,58 +69,113 @@ class ConflictResolver {
    * @private
    */
   _resolveWithDeletion(path, localData, remoteData) {
-    // If both are deletions, take the later one
+    // If both are deletions, use vector clock to decide
     if (localData.value === null && remoteData.value === null) {
-      return localData.timestamp > remoteData.timestamp
-        ? localData
-        : remoteData;
+      return this._vectorDominance(localData, remoteData);
     }
 
-    // For deletion conflicts, we need to decide if deletion wins or update wins
-    // For this implementation, we'll use timestamps to decide
-    // Later operations win over earlier ones
+    // Convert to VectorClock instances
+    const localClock = this._toVectorClock(localData.vectorClock);
+    const remoteClock = this._toVectorClock(remoteData.vectorClock);
+
+    // Get the relationship between the clocks
+    const relation = localClock.dominanceRelation(remoteClock);
+
+    // For deletion conflicts, we'll use vector clock dominance
     if (localData.value === null) {
       // Local is a deletion
-      if (localData.timestamp > remoteData.timestamp) {
-        console.log(`Deletion wins for ${path}`);
+      if (relation === "dominates" || relation === "concurrent") {
+        console.log(
+          `Deletion wins for ${path} (local deletion dominates or concurrent)`
+        );
         return localData;
       } else {
-        console.log(`Remote update wins over deletion for ${path}`);
+        console.log(
+          `Remote update wins over deletion for ${path} (remote dominates)`
+        );
         return remoteData;
       }
     } else {
       // Remote is a deletion
-      if (remoteData.timestamp > localData.timestamp) {
-        console.log(`Deletion wins for ${path}`);
+      if (relation === "dominated" || relation === "concurrent") {
+        console.log(
+          `Deletion wins for ${path} (remote deletion dominates or concurrent)`
+        );
         return remoteData;
       } else {
-        console.log(`Local update wins over deletion for ${path}`);
+        console.log(
+          `Local update wins over deletion for ${path} (local dominates)`
+        );
         return localData;
       }
     }
   }
 
   /**
-   * Last-write-wins strategy based on timestamp
+   * Vector dominance strategy - uses vector clocks to determine the winner
    * @private
    */
-  _lastWriteWins(localData, remoteData) {
-    return localData.timestamp >= remoteData.timestamp ? localData : remoteData;
+  _vectorDominance(localData, remoteData) {
+    // Convert to VectorClock instances
+    const localClock = this._toVectorClock(localData.vectorClock);
+    const remoteClock = this._toVectorClock(remoteData.vectorClock);
+
+    // Get the relationship between the clocks
+    const relation = localClock.dominanceRelation(remoteClock);
+
+    if (relation === "dominates" || relation === "identical") {
+      return localData;
+    } else if (relation === "dominated") {
+      return remoteData;
+    } else {
+      // Concurrent changes, use deterministic tiebreaker
+      const winner = localClock.deterministicWinner(
+        remoteClock,
+        localData.origin || "",
+        remoteData.origin || ""
+      );
+
+      return winner === "this" ? localData : remoteData;
+    }
   }
 
   /**
-   * First-write-wins strategy based on timestamp
+   * First-write-wins strategy - uses the same logic but prefers "dominated" vector clocks
    * @private
    */
   _firstWriteWins(localData, remoteData) {
-    return localData.timestamp <= remoteData.timestamp ? localData : remoteData;
+    // Convert to VectorClock instances
+    const localClock = this._toVectorClock(localData.vectorClock);
+    const remoteClock = this._toVectorClock(remoteData.vectorClock);
+
+    // Get the relationship between the clocks
+    const relation = localClock.dominanceRelation(remoteClock);
+
+    // For first-write-wins, we prefer the "dominated" vector clock
+    // which represents the earlier write in causal history
+    if (relation === "dominated" || relation === "identical") {
+      return localData;
+    } else if (relation === "dominates") {
+      return remoteData;
+    } else {
+      // Concurrent changes, use deterministic tiebreaker
+      // For first-write, we'll reverse the winner to prefer "smaller" clocks
+      const winner = localClock.deterministicWinner(
+        remoteClock,
+        localData.origin || "",
+        remoteData.origin || ""
+      );
+
+      return winner === "this" ? remoteData : localData;
+    }
   }
 
   /**
-   * Merge fields from both objects
-   * For fields present in both, use the latest timestamp
+   * Merge fields from both objects - improved implementation
+   * For fields present in both, use vector clock dominance
+   * @private
    */
-  mergeFields(path, localData, remoteData) {
+  _mergeFields(path, localData, remoteData) {
     console.log(`Merging fields for ${path}`);
 
     // Ensure we're dealing with objects
@@ -129,61 +187,69 @@ class ConflictResolver {
       Array.isArray(localData.value) ||
       Array.isArray(remoteData.value)
     ) {
-      // If not objects, fall back to last-write-wins
+      // If not objects, fall back to vector dominance
       console.log(
-        `Cannot merge non-object values, falling back to last-write-wins`
+        `Cannot merge non-object values, falling back to vector-dominance`
       );
-      return this._lastWriteWins(localData, remoteData);
+      return this._vectorDominance(localData, remoteData);
     }
 
-    // Create a new result object based on the newer data's metadata
+    // Convert to VectorClock instances
+    const localClock = this._toVectorClock(localData.vectorClock);
+    const remoteClock = this._toVectorClock(remoteData.vectorClock);
+
+    // Get the relationship between the clocks
+    const relation = localClock.dominanceRelation(remoteClock);
+    console.log(`Vector clock relation for ${path}: ${relation}`);
+
+    // Merge the vector clocks
+    const mergedClock = localClock.merge(remoteClock);
+
+    // Create a new result object with merged vector clock
     const result = {
-      ...(localData.timestamp >= remoteData.timestamp ? localData : remoteData),
-      value: {}, // Start with empty value
+      value: {},
+      vectorClock: mergedClock.toJSON(),
+      origin: localData.origin, // Keep local origin for consistency
     };
 
-    // Copy all fields from both objects
-    if (localData.value) {
-      Object.assign(result.value, localData.value);
-    }
+    // Get all fields from both objects
+    const allFields = new Set([
+      ...Object.keys(localData.value),
+      ...Object.keys(remoteData.value),
+    ]);
 
-    if (remoteData.value) {
-      // For fields that exist in both objects, determine which to keep based on timestamp
-      // For fields unique to remoteData, always include them
-      Object.keys(remoteData.value).forEach((key) => {
-        if (
-          !(key in localData.value) ||
-          remoteData.timestamp >= localData.timestamp
-        ) {
-          result.value[key] = remoteData.value[key];
-        }
-      });
-    }
+    // For each field, decide which value to use
+    for (const field of allFields) {
+      const inLocal = field in localData.value;
+      const inRemote = field in remoteData.value;
 
-    // Merge vector clocks (if available)
-    if (localData.vectorClock && remoteData.vectorClock) {
-      // Handle both objects and real VectorClock instances
-      if (typeof localData.vectorClock.merge === "function") {
-        result.vectorClock = localData.vectorClock.merge(
-          remoteData.vectorClock
-        );
-      } else if (typeof remoteData.vectorClock.merge === "function") {
-        result.vectorClock = remoteData.vectorClock.merge(
-          localData.vectorClock
-        );
+      if (inLocal && !inRemote) {
+        // Field only in local, use it
+        result.value[field] = localData.value[field];
+      } else if (!inLocal && inRemote) {
+        // Field only in remote, use it
+        result.value[field] = remoteData.value[field];
       } else {
-        // Manual merge of vector clocks
-        result.vectorClock = { ...localData.vectorClock };
-        for (const nodeId in remoteData.vectorClock) {
-          const localCount = result.vectorClock[nodeId] || 0;
-          const remoteCount = remoteData.vectorClock[nodeId];
-          result.vectorClock[nodeId] = Math.max(localCount, remoteCount);
+        // Field is in both, use the vector clock relationship to decide
+        if (relation === "dominates" || relation === "identical") {
+          // Local dominates or identical
+          result.value[field] = localData.value[field];
+        } else if (relation === "dominated") {
+          // Remote dominates
+          result.value[field] = remoteData.value[field];
+        } else {
+          // Concurrent updates
+          // Use a deterministic approach based on the node IDs
+          if (
+            (localData.origin || "").localeCompare(remoteData.origin || "") > 0
+          ) {
+            result.value[field] = localData.value[field];
+          } else {
+            result.value[field] = remoteData.value[field];
+          }
         }
       }
     }
-
-    // Use the latest timestamp
-    result.timestamp = Math.max(localData.timestamp, remoteData.timestamp);
 
     return result;
   }
@@ -197,17 +263,28 @@ class ConflictResolver {
 
     if (!resolver) {
       console.warn(
-        `No custom resolver found for ${path}, falling back to last-write-wins`
+        `No custom resolver found for ${path}, falling back to vector-dominance`
       );
-      return this._lastWriteWins(localData, remoteData);
+      return this._vectorDominance(localData, remoteData);
     }
 
     try {
       return resolver(path, localData, remoteData);
     } catch (error) {
       console.error(`Error in custom resolver for ${path}:`, error);
-      return this._lastWriteWins(localData, remoteData);
+      return this._vectorDominance(localData, remoteData);
     }
+  }
+
+  /**
+   * Helper to convert any vector clock representation to a VectorClock instance
+   * @private
+   */
+  _toVectorClock(clockData) {
+    if (clockData instanceof VectorClock) {
+      return clockData;
+    }
+    return new VectorClock(clockData || {});
   }
 
   /**

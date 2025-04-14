@@ -106,8 +106,8 @@ class SyncManager {
   }
 
   /**
-   * Handle PUT operations with conflict resolution
-   * @param {Object} data - Data object with path, value, timestamp, etc.
+   * Handle PUT operations with conflict resolution using vector clocks only
+   * @param {Object} data - Data object with path, value, vectorClock, etc.
    * @returns {Promise<Object>} - Processed data
    */
   async handlePut(data) {
@@ -119,14 +119,22 @@ class SyncManager {
 
     // Skip already processed messages
     if (data.msgId && this.processedMessages.has(data.msgId)) {
+      if (this.debugMode) {
+        console.log(`Already processed message ${data.msgId}, skipping`);
+      }
       return null;
     }
 
-    // Skip if we've already seen this message (our server ID is in the visited servers list)
+    // Skip if we've already seen this message
     if (
       Array.isArray(data.visitedServers) &&
       data.visitedServers.includes(this.server.serverID)
     ) {
+      if (this.debugMode) {
+        console.log(
+          `Already visited server ${this.server.serverID}, skipping to prevent loops`
+        );
+      }
       return null;
     }
 
@@ -151,7 +159,6 @@ class SyncManager {
       // Create new data object
       const newData = {
         value: data.value,
-        timestamp: data.timestamp || Date.now(),
         origin: data.origin || this.server.serverID,
         vectorClock: incomingVectorClock.toJSON(),
       };
@@ -183,11 +190,7 @@ class SyncManager {
   }
 
   /**
-   * Resolve conflicts between existing and new data
-   * @private
-   */
-  /**
-   * Resolve conflicts between existing and new data
+   * Resolve conflicts between existing and new data using vector clocks only
    * @private
    */
   async _resolveConflicts(path, existingData, newData, incomingVectorClock) {
@@ -215,91 +218,16 @@ class SyncManager {
       };
 
       // Compare vector clocks
-      const comparison = existingVectorClock.compare(incomingVectorClock);
-
-      // Get conflict resolution strategy for this path
+      const relation =
+        existingVectorClock.dominanceRelation(incomingVectorClock);
       const strategy = this.conflictResolver.getStrategyForPath(path);
 
-      // Handle different comparison results
-      if (comparison === -1) {
-        if (
-          strategy === "merge-fields" &&
-          typeof existingData.value === "object" &&
-          typeof newData.value === "object" &&
-          existingData.value !== null &&
-          newData.value !== null &&
-          !Array.isArray(existingData.value) &&
-          !Array.isArray(newData.value)
-        ) {
-          // Use field merging to preserve fields
-          finalData = this.conflictResolver.mergeFields(
-            path,
-            existingData,
-            newData
-          );
-        } else {
-          // For other strategies, accept newer data
-          finalData = newData;
-        }
-      } else if (comparison === 0) {
-        // Concurrent updates
-        console.log(`Detected concurrent update conflict for ${path}`);
+      console.log(
+        `Vector clock relation for ${path}: ${relation}, using strategy: ${strategy}`
+      );
 
-        // Apply conflict resolution strategy
-        finalData = this.conflictResolver.resolve(path, localData, remoteData);
-      } else if (comparison === 2) {
-        // Identical vector clocks
-        console.log(
-          `Identical vector clocks for ${path}, using conflict resolution`
-        );
-
-        if (
-          strategy === "merge-fields" &&
-          typeof existingData.value === "object" &&
-          typeof newData.value === "object" &&
-          existingData.value !== null &&
-          newData.value !== null &&
-          !Array.isArray(existingData.value) &&
-          !Array.isArray(newData.value)
-        ) {
-          // Even with identical vector clocks, try to merge fields
-          finalData = this.conflictResolver.mergeFields(
-            path,
-            existingData,
-            newData
-          );
-        } else {
-          // Apply standard conflict resolution
-          finalData = this.conflictResolver.resolve(
-            path,
-            localData,
-            remoteData
-          );
-        }
-      } else if (comparison === 1) {
-        // Local data is causally after remote data
-        console.log(`Local update for ${path} is newer than remote update`);
-
-        if (
-          strategy === "merge-fields" &&
-          typeof existingData.value === "object" &&
-          typeof newData.value === "object" &&
-          existingData.value !== null &&
-          newData.value !== null &&
-          !Array.isArray(existingData.value) &&
-          !Array.isArray(newData.value)
-        ) {
-          // Try to merge fields even when local is newer
-          finalData = this.conflictResolver.mergeFields(
-            path,
-            existingData,
-            newData
-          );
-        } else {
-          // For other strategies, keep local data
-          finalData = existingData;
-        }
-      }
+      // Apply conflict resolution
+      finalData = this.conflictResolver.resolve(path, localData, remoteData);
     }
 
     // Always merge with our vector clock
@@ -378,7 +306,7 @@ class SyncManager {
   }
 
   /**
-   * Add data to version history
+   * Add data to version history without timestamp dependencies
    * @private
    */
   _addToVersionHistory(path, data) {
@@ -392,14 +320,31 @@ class SyncManager {
 
     // Add to history
     history.push({
-      timestamp: data.timestamp,
       vectorClock: data.vectorClock,
       value: data.value,
       origin: data.origin,
     });
 
-    // Sort by timestamp (newest first)
-    history.sort((a, b) => b.timestamp - a.timestamp);
+    // Sort by vector clock dominance (rather than timestamp)
+    // This is a more complex sort - we compare each pair of vector clocks
+    history.sort((a, b) => {
+      const clockA =
+        a.vectorClock instanceof VectorClock
+          ? a.vectorClock
+          : VectorClock.fromJSON(a.vectorClock);
+      const clockB =
+        b.vectorClock instanceof VectorClock
+          ? b.vectorClock
+          : VectorClock.fromJSON(b.vectorClock);
+
+      const relation = clockA.dominanceRelation(clockB);
+
+      if (relation === "dominates") return -1; // a should come first
+      if (relation === "dominated") return 1; // b should come first
+
+      // For concurrent or identical, use origin as tiebreaker
+      return (a.origin || "").localeCompare(b.origin || "");
+    });
 
     // Limit history size
     if (history.length > this.maxVersions) {

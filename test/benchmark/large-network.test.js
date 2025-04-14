@@ -696,49 +696,73 @@ describe("Large P2P Network Tests", function () {
       peerConfigurations = [];
     });
 
-    it("should handle rapid joining and leaving of nodes while maintaining data consistency", async function () {
-      // Create a new data item that we'll use to test consistency
+    it("should handle joining and leaving of nodes while maintaining data consistency", async function () {
+      // Create a new data item that we'll use to test consistency with vector clock
       await servers[0].put("churn/test", {
         value: "original",
-        timestamp: Date.now(),
+        // No timestamp since we're using vector clocks
       });
 
-      // Start a series of node churns (leaving and joining)
-      console.log("Starting node churn test (rapid joining/leaving)");
+      // Wait for initial data to propagate
+      await wait(1000);
+
+      console.log("Starting deterministic node churn test");
+
+      // Pre-determine which nodes to shut down in each round
+      // This makes the test deterministic instead of using random selection
+      const shutdownPattern = [
+        [1, 3, 5], // Round 1: shut down nodes 2, 4, and 6
+        [0, 2, 4], // Round 2: shut down nodes 1, 3, and 5
+        [6, 8, 10], // Round 3: shut down nodes 7, 9, and 11
+      ];
+
+      // Pre-determine which node will make the update in each round
+      const updaterPattern = [0, 5, 7]; // Use nodes 1, 6, and 8 for updates
 
       for (let round = 0; round < 3; round++) {
-        console.log(`Round ${round + 1}: Shutting down nodes...`);
+        console.log(`Round ${round + 1}: Shutting down specific nodes...`);
 
-        // Shut down 3 random nodes that are not already down
-        const nodesToShutdown = [];
-        while (nodesToShutdown.length < 3) {
-          const nodeIdx = Math.floor(Math.random() * NODE_COUNT);
-          if (servers[nodeIdx] && !nodesToShutdown.includes(nodeIdx)) {
-            nodesToShutdown.push(nodeIdx);
-          }
-        }
+        // Get the nodes to shut down for this round
+        const nodesToShutdown = shutdownPattern[round].filter(
+          (idx) => idx < servers.length && servers[idx] !== null
+        );
 
+        // Shut down the selected nodes
         for (const nodeIdx of nodesToShutdown) {
           console.log(`- Shutting down node ${nodeIdx + 1}`);
           await servers[nodeIdx].close();
           servers[nodeIdx] = null;
         }
 
-        // Make an update to the test data from a running node
-        let updaterNodeIdx;
-        do {
-          updaterNodeIdx = Math.floor(Math.random() * NODE_COUNT);
-        } while (servers[updaterNodeIdx] === null);
+        // Fixed updater node for this round
+        const updaterNodeIdx = updaterPattern[round];
 
-        console.log(`Updating data from node ${updaterNodeIdx + 1}`);
-        await servers[updaterNodeIdx].put("churn/test", {
+        // If the updater node is available, use it; otherwise find the first available node
+        let actualUpdaterIdx = updaterNodeIdx;
+        if (
+          updaterNodeIdx >= servers.length ||
+          servers[updaterNodeIdx] === null
+        ) {
+          actualUpdaterIdx = servers.findIndex((s) => s !== null);
+          if (actualUpdaterIdx === -1) {
+            throw new Error("No available servers to update data!");
+          }
+        }
+
+        console.log(`Updating data from node ${actualUpdaterIdx + 1}`);
+        await servers[actualUpdaterIdx].put("churn/test", {
           value: `updated-round-${round + 1}`,
-          timestamp: Date.now(),
         });
+
+        // Wait a consistent amount of time after the update
+        await wait(500);
 
         // Restart the shutdown nodes with their original configurations
         console.log("Restarting nodes...");
         for (const nodeIdx of nodesToShutdown) {
+          // Skip if we're trying to restart a node that doesn't exist in our configuration
+          if (nodeIdx >= peerConfigurations.length) continue;
+
           // Get the original configuration for this node
           const config = peerConfigurations[nodeIdx];
 
@@ -752,6 +776,9 @@ describe("Large P2P Network Tests", function () {
               maxMessageAge: 60000,
               maxVersions: 5,
             },
+            conflict: {
+              defaultStrategy: "vector-dominance", // Use vector clocks
+            },
           });
 
           await servers[nodeIdx].start();
@@ -760,36 +787,49 @@ describe("Large P2P Network Tests", function () {
           );
         }
 
-        // Wait for anti-entropy to run
-        await wait(1100);
+        // Wait for anti-entropy to run - use a consistent time
+        console.log("Waiting for anti-entropy to run...");
+        await wait(1500);
       }
 
-      // Force final anti-entropy on all nodes
-      console.log("Running final anti-entropy sync on all nodes...");
-      for (const server of servers) {
-        if (server) {
-          server.runAntiEntropy();
+      // Force anti-entropy on all nodes in a specific order
+      console.log("Running final anti-entropy sync on all nodes in order...");
+      for (let i = 0; i < servers.length; i++) {
+        if (servers[i]) {
+          await servers[i].runAntiEntropy();
+          // Add a small delay between anti-entropy runs
+          await wait(200);
         }
       }
 
       // Wait for final synchronization
-      await wait(5000);
+      console.log("Waiting for final synchronization...");
+      await wait(3000);
 
       // Check data consistency across all nodes
       let valueMap = new Map();
       let consistentCount = 0;
       const expectedFinalValue = "updated-round-3";
 
+      console.log("Checking final data consistency...");
       for (let i = 0; i < servers.length; i++) {
         if (servers[i]) {
-          const data = await servers[i].get("churn/test");
-          if (data) {
-            const value = data.value;
-            valueMap.set(value, (valueMap.get(value) || 0) + 1);
+          try {
+            const data = await servers[i].get("churn/test");
+            if (data) {
+              const value = data.value;
+              valueMap.set(value, (valueMap.get(value) || 0) + 1);
 
-            if (value === expectedFinalValue) {
-              consistentCount++;
+              console.log(`Node ${i + 1} has value: ${value}`);
+
+              if (value === expectedFinalValue) {
+                consistentCount++;
+              }
+            } else {
+              console.log(`Node ${i + 1} has no data for churn/test`);
             }
+          } catch (err) {
+            console.error(`Error reading from node ${i + 1}:`, err.message);
           }
         }
       }

@@ -225,6 +225,69 @@ class VectorClock {
 
     return `[${entries}]`;
   }
+
+  /**
+   * Compare vector clocks to see if one dominates the other
+   * @param {VectorClock|Object} otherClock - Clock to compare with
+   * @returns {string} Relationship: 'dominates', 'dominated', 'concurrent', or 'identical'
+   */
+  dominanceRelation(otherClock) {
+    const comparison = this.compare(otherClock);
+
+    switch (comparison) {
+      case 1:
+        return "dominates"; // this > other
+      case -1:
+        return "dominated"; // this < other
+      case 0:
+        return "concurrent"; // this || other (concurrent)
+      case 2:
+        return "identical"; // this == other
+      default:
+        return "unknown";
+    }
+  }
+
+  /**
+   * Get a deterministic winner between concurrent vector clocks
+   * @param {VectorClock|Object} otherClock - Clock to compare with
+   * @param {string} thisId - This node's identifier
+   * @param {string} otherId - Other node's identifier
+   * @returns {string} Winner: 'this', 'other', or 'identical'
+   */
+  deterministicWinner(otherClock, thisId, otherId) {
+    const relation = this.dominanceRelation(otherClock);
+
+    if (relation === "dominates") return "this";
+    if (relation === "dominated") return "other";
+    if (relation === "identical") return "identical";
+
+    // If concurrent, use a deterministic tiebreaker (e.g., comparing node IDs)
+    return thisId.localeCompare(otherId) > 0 ? "this" : "other";
+  }
+
+  /**
+   * Compute a hash-based value that is consistent across the network
+   * (Alternative tiebreaker method for concurrent updates)
+   */
+  hashCode() {
+    // Sort entries for deterministic ordering
+    const entries = Object.entries(this.clock).sort(([keyA], [keyB]) =>
+      keyA.localeCompare(keyB)
+    );
+
+    // Create a string representation
+    const str = entries.map(([key, value]) => `${key}:${value}`).join(",");
+
+    // Simple hash function
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      const char = str.charCodeAt(i);
+      hash = (hash << 5) - hash + char;
+      hash = hash & hash; // Convert to 32bit integer
+    }
+    return hash;
+  }
 }
 
 module.exports = VectorClock;

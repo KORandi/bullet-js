@@ -16,7 +16,7 @@ const SocketManager = require("../network/socket-manager");
 // Import sync components
 const SyncManager = require("../sync/sync-manager");
 const { getDefaultConfig, validateConfig } = require("./config");
-const merge = require("deepmerge");
+const VectorClock = require("../sync/vector-clock");
 const deepmerge = require("deepmerge");
 
 class P2PServer {
@@ -85,14 +85,18 @@ class P2PServer {
       throw new Error("Server is shutting down, cannot accept new data");
     }
 
+    // Get our current vector clock and increment it for this update
+    const currentClock = this.syncManager.getVectorClock();
+    const vectorClock = new VectorClock(currentClock);
+    vectorClock.increment(this.serverID);
+
     // Create data object with metadata
     const data = {
       path,
       value,
-      timestamp: Date.now(),
       msgId: randomBytes(16).toString("hex"),
       origin: this.serverID,
-      vectorClock: this.syncManager.getVectorClock(),
+      vectorClock: vectorClock.toJSON(),
     };
 
     // Process through sync manager
@@ -101,7 +105,6 @@ class P2PServer {
     return {
       path,
       value: result.value,
-      timestamp: result.timestamp,
       vectorClock: result.vectorClock,
     };
   }

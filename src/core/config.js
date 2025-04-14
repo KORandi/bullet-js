@@ -23,7 +23,7 @@ function getDefaultConfig() {
 
     // Conflict resolution configuration
     conflict: {
-      defaultStrategy: "last-write-wins",
+      defaultStrategy: "vector-dominance",
       pathStrategies: {},
       customResolvers: {},
     },
@@ -120,16 +120,15 @@ function validateConfig(config) {
     // Default strategy
     if (config.conflict.defaultStrategy !== undefined) {
       const validStrategies = [
-        "last-write-wins",
+        "vector-dominance", // New strategy name
+        "last-write-wins", // Keep for backward compatibility
         "first-write-wins",
         "merge-fields",
         "custom",
       ];
       if (!validStrategies.includes(config.conflict.defaultStrategy)) {
         throw new Error(
-          `Invalid defaultStrategy: ${
-            config.conflict.defaultStrategy
-          }. Must be one of: ${validStrategies.join(", ")}`
+          `Invalid defaultStrategy: ${config.conflict.defaultStrategy}. Must be one of: ${validStrategies.join(", ")}`
         );
       }
     }
@@ -144,11 +143,13 @@ function validateConfig(config) {
       }
 
       const validStrategies = [
-        "last-write-wins",
+        "vector-dominance", // New strategy name
+        "last-write-wins", // Keep for backward compatibility
         "first-write-wins",
         "merge-fields",
         "custom",
       ];
+
       for (const [path, strategy] of Object.entries(
         config.conflict.pathStrategies
       )) {
