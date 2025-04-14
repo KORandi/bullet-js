@@ -610,6 +610,25 @@ class SyncManager {
   registerConflictResolver(path, resolverFn) {
     this.conflictResolver.registerCustomResolver(path, resolverFn);
   }
+
+  /**
+   * Handle anti-entropy data request from peer
+   * @param {Object} data - Request data
+   * @param {Object} socket - Socket.IO socket
+   * @returns {Promise<void>}
+   */
+  async handleAntiEntropyRequest(data, socket) {
+    return this.antiEntropy.handleAntiEntropyRequest(data, socket);
+  }
+
+  /**
+   * Handle anti-entropy data response from peer
+   * @param {Object} data - Response data
+   * @returns {Promise<void>}
+   */
+  async handleAntiEntropyResponse(data) {
+    return this.antiEntropy.handleAntiEntropyResponse(data);
+  }
 }
 
 module.exports = SyncManager;

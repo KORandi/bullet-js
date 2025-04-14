@@ -315,7 +315,7 @@ describe("Synchronization Integration Tests", function () {
       expect(data.value).to.equal("offline-data");
     });
 
-    it("should manually trigger anti-entropy synchronization", async () => {
+    it("should manually trigger pull-based anti-entropy synchronization", async () => {
       // Setup a 2-node network with no auto anti-entropy
       servers = createTestNetwork(2, 4001, "./test/temp/sync-test-db", {
         sync: {
@@ -341,8 +341,8 @@ describe("Synchronization Integration Tests", function () {
       // Write more data on first server while broadcast is disabled
       await servers[0].put("manual/offline", { value: "manual-offline-data" });
 
-      // Manually trigger anti-entropy on first server
-      await servers[0].runAntiEntropy();
+      // Manually trigger pull-based anti-entropy on second server
+      await servers[1].runAntiEntropy();
 
       // Wait for sync
       await wait(1000);
@@ -350,7 +350,7 @@ describe("Synchronization Integration Tests", function () {
       // Restore broadcasting
       servers[0].socketManager.broadcast = originalBroadcast;
 
-      // Check if second server received the data through manual anti-entropy
+      // Check if second server received the data through manual pull-based anti-entropy
       const data = await servers[1].get("manual/offline");
 
       expect(data).to.not.be.null;

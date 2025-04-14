@@ -1,5 +1,6 @@
 /**
  * Anti-Entropy - Handles periodic synchronization to ensure data consistency
+ * Pull-based implementation where peers request data rather than pushing it
  */
 
 class AntiEntropy {
@@ -48,18 +49,14 @@ class AntiEntropy {
 
       console.log(`Running anti-entropy with ${selectedPeers.length} peers`);
 
-      // Get all changes to share
-      const allChanges = await this._getRecentChanges();
-      console.log(`Found ${allChanges.length} changes to sync`);
-
       // Create a batch ID for this anti-entropy run
       const batchId = `anti-entropy-${server.serverID}-${Date.now()}`;
 
       // First, synchronize vector clocks
       await this._syncVectorClocksWithPeers(selectedPeers, batchId);
 
-      // Then send all data changes
-      await this._syncDataWithPeers(selectedPeers, allChanges, batchId);
+      // Request data from peers instead of pushing
+      await this._requestDataFromPeers(selectedPeers, batchId);
 
       // Run final vector clock sync
       await this.synchronizeVectorClocks();
@@ -105,14 +102,13 @@ class AntiEntropy {
   }
 
   /**
-   * Synchronize data with peers
+   * Request data from peers (pull-based approach)
    * @private
    * @param {Array<string>} peers - Peer IDs
-   * @param {Array<Object>} changes - Data changes
    * @param {string} batchId - Unique batch ID
    * @returns {Promise<void>}
    */
-  async _syncDataWithPeers(peers, changes, batchId) {
+  async _requestDataFromPeers(peers, batchId) {
     const syncManager = this.syncManager;
     const server = syncManager.server;
 
@@ -124,41 +120,26 @@ class AntiEntropy {
         continue;
       }
 
-      let syncCount = 0;
+      // Create a unique request ID
+      const requestId = `${batchId}-request-${Math.random()
+        .toString(36)
+        .substring(2, 9)}`;
 
-      for (const change of changes) {
-        // Skip if shutting down mid-process
-        if (syncManager.isShuttingDown) break;
+      // Prepare the data request with our current vector clock
+      const requestData = {
+        requestId: requestId,
+        nodeId: server.serverID,
+        vectorClock: syncManager.vectorClock.toJSON(),
+        timestamp: Date.now(),
+      };
 
-        // Create a unique message ID
-        const msgId = `${batchId}-${syncCount}-${Math.random()
-          .toString(36)
-          .substring(2, 9)}`;
-
-        // Prepare sync data with current vector clock
-        const syncData = {
-          path: change.path,
-          value: change.value,
-          timestamp: change.timestamp,
-          origin: change.origin,
-          vectorClock: syncManager.vectorClock.toJSON(),
-          msgId: msgId,
-          forwarded: true,
-          antiEntropy: true,
-        };
-
-        // Send to the selected peer
-        socket.emit("put", syncData);
-        syncCount++;
-
-        // Add a small delay every 20 items to prevent flooding
-        if (syncCount % 20 === 0) {
-          await new Promise((resolve) => setTimeout(resolve, 20));
-        }
-      }
-
-      console.log(`Sent ${syncCount} changes to peer ${peer} for anti-entropy`);
+      // Send the data request to the peer
+      console.log(`Requesting data from peer ${peer}`);
+      socket.emit("anti-entropy-request", requestData);
     }
+
+    // Give peers time to respond
+    await new Promise((resolve) => setTimeout(resolve, 500));
   }
 
   /**
@@ -224,17 +205,160 @@ class AntiEntropy {
   }
 
   /**
-   * Get recent changes for anti-entropy sync
+   * Get all data changes for responding to anti-entropy requests
    * @private
    * @returns {Promise<Array>} - List of changes
    */
-  async _getRecentChanges() {
+  async _getAllChanges() {
     try {
       // Get all data from the database
       return await this.syncManager.server.db.scan("");
     } catch (error) {
       console.error("Error getting changes for anti-entropy:", error);
       return [];
+    }
+  }
+
+  /**
+   * Handle incoming anti-entropy data request
+   * @param {Object} data - Request data
+   * @param {Object} socket - Socket.IO socket
+   * @returns {Promise<void>}
+   */
+  async handleAntiEntropyRequest(data, socket) {
+    const syncManager = this.syncManager;
+    const server = syncManager.server;
+
+    // Skip if shutting down
+    if (syncManager.isShuttingDown) return;
+
+    try {
+      // Validate the request
+      if (!data || !data.requestId || !data.nodeId || !data.vectorClock) {
+        console.warn("Invalid anti-entropy request data:", data);
+        return;
+      }
+
+      console.log(`Received anti-entropy request from ${data.nodeId}`);
+
+      // Add the requesting node to known nodes
+      syncManager.knownNodeIds.add(data.nodeId);
+
+      // Get the requester's vector clock
+      const requesterClock = syncManager.constructor.VectorClock.fromJSON(
+        data.vectorClock
+      );
+
+      // Merge the requester's clock with our clock
+      syncManager.vectorClock = syncManager.vectorClock.merge(requesterClock);
+
+      // Get all our data to send back
+      const allChanges = await this._getAllChanges();
+      console.log(
+        `Sending ${allChanges.length} changes in response to anti-entropy request`
+      );
+
+      // Organize data into batches to avoid overwhelming the network
+      const BATCH_SIZE = 20;
+      const batchCount = Math.ceil(allChanges.length / BATCH_SIZE);
+
+      for (let batchIndex = 0; batchIndex < batchCount; batchIndex++) {
+        // Skip if shutting down mid-process
+        if (syncManager.isShuttingDown) break;
+
+        const startIndex = batchIndex * BATCH_SIZE;
+        const endIndex = Math.min(startIndex + BATCH_SIZE, allChanges.length);
+        const batchChanges = allChanges.slice(startIndex, endIndex);
+
+        // Prepare response batch
+        const responseData = {
+          responseId: data.requestId,
+          nodeId: server.serverID,
+          vectorClock: syncManager.vectorClock.toJSON(),
+          timestamp: Date.now(),
+          batchIndex: batchIndex,
+          totalBatches: batchCount,
+          changes: batchChanges,
+        };
+
+        // Send the response batch
+        socket.emit("anti-entropy-response", responseData);
+
+        // Add a small delay between batches
+        if (batchIndex < batchCount - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+      }
+
+      console.log(
+        `Sent anti-entropy response to ${data.nodeId} in ${batchCount} batches`
+      );
+    } catch (error) {
+      console.error("Error handling anti-entropy request:", error);
+    }
+  }
+
+  /**
+   * Handle incoming anti-entropy response
+   * @param {Object} data - Response data
+   * @returns {Promise<void>}
+   */
+  async handleAntiEntropyResponse(data) {
+    const syncManager = this.syncManager;
+
+    // Skip if shutting down
+    if (syncManager.isShuttingDown) return;
+
+    try {
+      // Validate the response
+      if (!data || !data.responseId || !data.nodeId || !data.changes) {
+        console.warn("Invalid anti-entropy response data:", data);
+        return;
+      }
+
+      console.log(
+        `Received anti-entropy response batch ${data.batchIndex + 1}/${data.totalBatches} from ${data.nodeId} with ${data.changes.length} changes`
+      );
+
+      // Add the responding node to known nodes
+      syncManager.knownNodeIds.add(data.nodeId);
+
+      // Merge vector clocks
+      if (data.vectorClock) {
+        const remoteClock = syncManager.constructor.VectorClock.fromJSON(
+          data.vectorClock
+        );
+        syncManager.vectorClock = syncManager.vectorClock.merge(remoteClock);
+      }
+
+      // Process each change
+      for (const change of data.changes) {
+        // Skip if shutting down mid-process
+        if (syncManager.isShuttingDown) break;
+
+        // Prepare the data for processing
+        const syncData = {
+          path: change.path,
+          value: change.value,
+          timestamp: change.timestamp,
+          origin: change.origin || data.nodeId,
+          vectorClock: data.vectorClock,
+          msgId: `anti-entropy-${data.responseId}-${change.path}`,
+          forwarded: true,
+          antiEntropy: true,
+        };
+
+        // Process the update through the sync manager
+        await syncManager.handlePut(syncData);
+      }
+
+      if (data.batchIndex === data.totalBatches - 1) {
+        console.log(
+          `Completed processing anti-entropy response from ${data.nodeId}`
+        );
+      }
+    } catch (error) {
+      console.error("Error handling anti-entropy response:", error);
     }
   }
 

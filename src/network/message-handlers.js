@@ -75,6 +75,26 @@ function setupMessageHandlers(socket, server, isIncoming = true) {
     }
   });
 
+  // Handle anti-entropy data requests (pull-based approach)
+  socket.on("anti-entropy-request", (data) => {
+    if (server.isShuttingDown) return;
+
+    // Process via sync manager
+    if (server.syncManager) {
+      server.syncManager.handleAntiEntropyRequest(data, socket);
+    }
+  });
+
+  // Handle anti-entropy data responses
+  socket.on("anti-entropy-response", (data) => {
+    if (server.isShuttingDown) return;
+
+    // Process via sync manager
+    if (server.syncManager) {
+      server.syncManager.handleAntiEntropyResponse(data);
+    }
+  });
+
   // Handle disconnect event
   socket.on("disconnect", () => {
     // This is handled by SocketManager's connection tracking
@@ -122,8 +142,43 @@ function handleVectorClockSyncResponse(data, server) {
   }
 }
 
+/**
+ * Handle anti-entropy data request
+ * @param {Object} data - Request data
+ * @param {Object} socket - Socket.IO socket
+ * @param {Object} server - P2PServer instance
+ */
+function handleAntiEntropyRequest(data, socket, server) {
+  // Skip if shutting down
+  if (server.isShuttingDown) return;
+
+  try {
+    server.syncManager.handleAntiEntropyRequest(data, socket);
+  } catch (error) {
+    console.error("Error handling anti-entropy request:", error);
+  }
+}
+
+/**
+ * Handle anti-entropy data response
+ * @param {Object} data - Response data
+ * @param {Object} server - P2PServer instance
+ */
+function handleAntiEntropyResponse(data, server) {
+  // Skip if shutting down
+  if (server.isShuttingDown) return;
+
+  try {
+    server.syncManager.handleAntiEntropyResponse(data);
+  } catch (error) {
+    console.error("Error handling anti-entropy response:", error);
+  }
+}
+
 module.exports = {
   setupMessageHandlers,
   handleVectorClockSync,
   handleVectorClockSyncResponse,
+  handleAntiEntropyRequest,
+  handleAntiEntropyResponse,
 };
