@@ -38,8 +38,6 @@ class ConflictResolver {
     // Find the appropriate strategy for this path
     const strategy = this.getStrategyForPath(path);
 
-    console.log(`Resolving conflict for ${path} using ${strategy} strategy`);
-
     // Apply the selected strategy
     switch (strategy) {
       case "last-write-wins":

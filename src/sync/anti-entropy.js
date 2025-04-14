@@ -259,7 +259,7 @@ class AntiEntropy {
       );
 
       // Organize data into batches to avoid overwhelming the network
-      const BATCH_SIZE = 20;
+      const BATCH_SIZE = 50;
       const batchCount = Math.ceil(allChanges.length / BATCH_SIZE);
 
       for (let batchIndex = 0; batchIndex < batchCount; batchIndex++) {

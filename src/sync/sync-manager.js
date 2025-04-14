@@ -231,11 +231,6 @@ class SyncManager {
 
       // Handle different comparison results
       if (comparison === -1) {
-        // Existing data is causally before new data
-        console.log(
-          `Update for ${path} is newer (vector clock), checking for merge opportunity`
-        );
-
         if (
           strategy === "merge-fields" &&
           typeof existingData.value === "object" &&
