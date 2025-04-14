@@ -60,8 +60,14 @@ class DatabaseManager {
    */
   async del(path) {
     try {
-      await this.db.del(path);
-      return true;
+      if (await this.db.get(path)) {
+        await this.db.del(path);
+        return true;
+      } else {
+        const err = new Error("NotFoundError");
+        err.type = "NotFoundError";
+        throw err;
+      }
     } catch (error) {
       if (error.code === "LEVEL_NOT_FOUND" || error.type === "NotFoundError") {
         return false;

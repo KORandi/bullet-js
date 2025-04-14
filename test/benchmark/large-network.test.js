@@ -686,6 +686,7 @@ describe("Large P2P Network Tests", function () {
 
   describe("Node Churn", function () {
     let servers = [];
+    let peerConfigurations = []; // Store original peer configurations
 
     // Set up a fresh network before this test
     beforeEach(async function () {
@@ -697,18 +698,27 @@ describe("Large P2P Network Tests", function () {
         },
       };
 
+      // Create the network
       servers = await createAndStartNetwork(
         NODE_COUNT,
         BASE_PORT,
         `${DB_PATH_PREFIX}churn-`,
         options
       );
+
+      // Store the peer configuration for each node
+      peerConfigurations = servers.map((server) => ({
+        port: server.port,
+        dbPath: server.dbPath,
+        peers: server.peers.slice(), // Make a copy of peers array
+      }));
     });
 
     // Clean up after the test
     afterEach(async function () {
       await cleanupServers(servers);
       servers = [];
+      peerConfigurations = [];
     });
 
     it("should handle rapid joining and leaving of nodes while maintaining data consistency", async function () {
@@ -757,20 +767,28 @@ describe("Large P2P Network Tests", function () {
         // Wait a bit for propagation
         await wait(1000);
 
-        // Restart the shutdown nodes
+        // Restart the shutdown nodes with their original configurations
         console.log("Restarting nodes...");
         for (const nodeIdx of nodesToShutdown) {
-          servers[nodeIdx] = createTestNetwork(
-            1,
-            BASE_PORT + nodeIdx,
-            `${DB_PATH_PREFIX}churn-${nodeIdx + 1}`,
-            {
-              sync: { antiEntropyInterval: 2000 },
-            }
-          )[0];
+          // Get the original configuration for this node
+          const config = peerConfigurations[nodeIdx];
+
+          // Create a new server with the same configuration
+          servers[nodeIdx] = new P2PServer({
+            port: config.port,
+            dbPath: config.dbPath,
+            peers: config.peers,
+            sync: {
+              antiEntropyInterval: 2000, // More frequent anti-entropy for faster recovery
+              maxMessageAge: 60000,
+              maxVersions: 5,
+            },
+          });
 
           await servers[nodeIdx].start();
-          console.log(`- Restarted node ${nodeIdx + 1}`);
+          console.log(
+            `- Restarted node ${nodeIdx + 1} with its original peer connections`
+          );
         }
 
         // Wait for anti-entropy to run
@@ -778,6 +796,7 @@ describe("Large P2P Network Tests", function () {
       }
 
       // Force final anti-entropy on all nodes
+      console.log("Running final anti-entropy sync on all nodes...");
       for (const server of servers) {
         if (server) {
           await server.runAntiEntropy();

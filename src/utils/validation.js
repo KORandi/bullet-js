@@ -10,12 +10,24 @@
  */
 function isValidPath(path) {
   // Path must be a non-empty string
-  if (typeof path !== "string" || path.trim() === "") {
+  if (typeof path !== "string" || path.trim() === "" || path.endsWith("/")) {
     return false;
   }
 
   // Path should not contain invalid characters
-  const invalidChars = ["#", "?", "\\", '"', "<", ">", "|", "*", ":"];
+  const invalidChars = [
+    "#",
+    "?",
+    "\\",
+    '"',
+    "<",
+    ">",
+    "|",
+    "*",
+    ":",
+    " ",
+    "//",
+  ];
   if (invalidChars.some((char) => path.includes(char))) {
     return false;
   }
@@ -123,25 +135,6 @@ function createValidator(validationFn, errorMessage) {
     return value;
   };
 }
-
-function deepMerge(target: any, source: any): any {
-  const output = { ...target };
-  for (const key in source) {
-    if (
-      source[key] instanceof Object &&
-      key in target &&
-      target[key] instanceof Object
-    ) {
-      output[key] = deepMerge(target[key], source[key]);
-    } else {
-      output[key] = source[key];
-    }
-  }
-  return output;
-}
-
-const config = deepMerge(getDefaultConfig(), options);
-
 
 module.exports = {
   isValidPath,
