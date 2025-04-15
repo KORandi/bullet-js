@@ -5,12 +5,14 @@
 
 const express = require("express");
 const { createServer } = require("http");
+const { randomBytes } = require("crypto");
 
 // Import core managers
 const DatabaseManager = require("./database-manager");
 
 // Import network components
 const SocketManager = require("../network/socket-manager");
+const WebRTCNATManager = require("../network/webrtc-nat-manager");
 
 // Import sync components
 const SyncManager = require("../sync/sync-manager");
@@ -34,6 +36,10 @@ class P2PServer {
     this.peers = config.peers || [];
     this.isShuttingDown = false;
 
+    // WebRTC configuration
+    this.webrtcEnabled = config.webrtc?.enabled || false;
+    this.webrtcConfig = config.webrtc || {};
+
     // Initialize Express and HTTP server
     this.app = express();
     this.app.use(express.json());
@@ -42,6 +48,26 @@ class P2PServer {
     // Initialize core components
     this.db = new DatabaseManager(this.dbPath);
     this.socketManager = new SocketManager(this);
+
+    // Initialize WebRTC NAT traversal if enabled
+    if (this.webrtcEnabled) {
+      this.webrtcManager = new WebRTCNATManager(this.webrtcConfig, this);
+
+      const stunServers = this.webrtcConfig.stunServers || [
+        "stun:stun.l.google.com:19302",
+      ];
+      const signalingServer = this.webrtcConfig.signalingServer || null;
+
+      console.log("WebRTC support is enabled with:");
+      console.log("- STUN servers:", stunServers);
+      console.log(
+        "- Signaling server:",
+        signalingServer || "Not configured (limited NAT traversal)"
+      );
+    } else {
+      console.log("WebRTC support is disabled");
+    }
+
     this.syncManager = new SyncManager(
       this,
       config.sync || {},
@@ -58,7 +84,12 @@ class P2PServer {
       // Initialize socket connections
       this.socketManager.init(this.server);
 
-      // Connect to peers
+      // Initialize WebRTC if enabled
+      if (this.webrtcEnabled && this.webrtcManager) {
+        this.webrtcManager.init();
+      }
+
+      // Connect to peers via websocket
       this.socketManager.connectToPeers(this.peers);
 
       // Start HTTP server
@@ -68,6 +99,7 @@ class P2PServer {
         );
         console.log(`Database path: ${this.dbPath}`);
         console.log(`Known peers: ${this.peers.join(", ") || "none"}`);
+        console.log(`WebRTC enabled: ${this.webrtcEnabled}`);
         resolve();
       });
     });
@@ -229,6 +261,62 @@ class P2PServer {
   }
 
   /**
+   * Connect to a specific peer via WebRTC (NAT traversal)
+   * @param {string} peerId - Peer ID to connect to
+   * @returns {Promise<boolean>} - Whether connection was initiated
+   */
+  async connectToPeerViaWebRTC(peerId) {
+    if (!this.webrtcEnabled || !this.webrtcManager) {
+      console.warn("WebRTC is not enabled, cannot connect to peer via WebRTC");
+      return false;
+    }
+
+    return this.webrtcManager.connectToPeer(peerId);
+  }
+
+  /**
+   * Check WebRTC connection status with a peer
+   * @param {string} peerId - Peer ID to check
+   * @returns {boolean} - Whether a WebRTC connection is established
+   */
+  hasWebRTCConnection(peerId) {
+    if (!this.webrtcEnabled || !this.webrtcManager) {
+      return false;
+    }
+
+    return this.webrtcManager.isConnectedToPeer(peerId);
+  }
+
+  /**
+   * Get connection statistics
+   * @returns {Object} - Connection statistics
+   */
+  getConnectionStats() {
+    const socketStats = this.socketManager.getConnectionStatus();
+
+    let webrtcStats = {
+      connected: 0,
+      peers: [],
+      pendingPeers: [],
+    };
+
+    if (this.webrtcEnabled && this.webrtcManager) {
+      const stats = this.webrtcManager.getConnectionStats();
+      webrtcStats.connected = stats.connectedCount;
+      webrtcStats.peers = stats.connectedPeers;
+      webrtcStats.pendingPeers = stats.pendingPeers;
+      webrtcStats.signalingConnected = stats.signalingConnected;
+    }
+
+    return {
+      websocket: socketStats,
+      webrtc: webrtcStats,
+      totalPeers: new Set([...socketStats.peersById, ...webrtcStats.peers])
+        .size,
+    };
+  }
+
+  /**
    * Close server and database connections
    * @returns {Promise<void>}
    */
@@ -244,10 +332,16 @@ class P2PServer {
           console.log(`Server ${this.serverID} stopped sync manager`);
         }
 
-        // Close socket connections
+        // Close socket and WebRTC connections
         if (this.socketManager) {
           this.socketManager.closeAllConnections();
           console.log(`Server ${this.serverID} closed socket connections`);
+        }
+
+        // Close WebRTC separately if necessary
+        if (this.webrtcEnabled && this.webrtcManager) {
+          this.webrtcManager.closeAllConnections();
+          console.log(`Server ${this.serverID} closed WebRTC connections`);
         }
 
         // Small delay for sockets to disconnect
