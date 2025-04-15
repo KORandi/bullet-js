@@ -4,7 +4,7 @@
  */
 
 const SimplePeer = require("simple-peer");
-const wrtc = require("wrtc");
+const wrtc = require("@roamhq/wrtc"); // Používáme vylepšenou verzi wrtc
 const SignalingClient = require("./signaling-client");
 
 class WebRTCNATManager {
@@ -75,7 +75,7 @@ class WebRTCNATManager {
       // Check if WebRTC implementation is available
       if (!wrtc) {
         console.warn(
-          "WebRTC implementation (wrtc package) not available, WebRTC will be disabled"
+          "WebRTC implementation (@roamhq/wrtc package) not available, WebRTC will be disabled"
         );
         this.enabled = false;
         return;
