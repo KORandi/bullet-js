@@ -1,5 +1,6 @@
 /**
  * SocketManager - Manages WebSocket connections between peers
+ * Also coordinates with WebRTC connections when enabled
  */
 
 const socketIO = require("socket.io");
@@ -17,10 +18,12 @@ class SocketManager {
     this.socketsByUrl = {}; // Map of url -> socket
     this.urlToPeerId = {}; // Map of url -> peerID
     this.peerIdToUrl = {}; // Map of peerID -> url
+    this.webrtcPeers = {}; // Map of peerID -> WebRTC dataChannel
     this.io = null;
     this.myUrl = null;
     this.isShuttingDown = false;
     this.peerSockets = []; // Store client socket connections
+    this.webrtcEnabled = server.webrtcEnabled || false;
   }
 
   /**
@@ -78,7 +81,33 @@ class SocketManager {
 
           socket.emit("vector-clock-sync", syncMessage);
         }
+
+        // If WebRTC is enabled, try to establish a WebRTC connection
+        if (this.webrtcEnabled && this.server.webrtcManager) {
+          this.server.webrtcManager
+            .connectToPeer(peerId)
+            .catch((err) =>
+              console.warn(
+                `Could not establish WebRTC connection with ${peerId}:`,
+                err
+              )
+            );
+        }
       });
+
+      // Set up WebRTC signaling handlers
+      if (this.webrtcEnabled) {
+        socket.on("webrtc-signal", (data) => {
+          // Forward to webrtcManager - it will handle the signal if it's for us
+          if (this.server.webrtcManager) {
+            this.server.webrtcManager.handleSignal(
+              socket,
+              data.peerId,
+              data.signal
+            );
+          }
+        });
+      }
 
       // Set up message handlers for incoming connection
       setupMessageHandlers(socket, this.server, true);
@@ -162,11 +191,39 @@ class SocketManager {
   }
 
   /**
+   * Register a WebRTC peer connection
+   * @param {string} peerId - Peer ID
+   * @param {Object} peer - WebRTC peer or data channel
+   */
+  registerWebRTCPeer(peerId, peer) {
+    if (this.isShuttingDown) return;
+
+    console.log(`Registering WebRTC connection with peer ${peerId}`);
+    this.webrtcPeers[peerId] = peer;
+  }
+
+  /**
+   * Unregister a WebRTC peer connection
+   * @param {string} peerId - Peer ID
+   */
+  unregisterWebRTCPeer(peerId) {
+    if (this.isShuttingDown) return;
+
+    console.log(`Unregistering WebRTC connection with peer ${peerId}`);
+    delete this.webrtcPeers[peerId];
+  }
+
+  /**
    * Close all socket connections properly
    */
   closeAllConnections() {
     this.isShuttingDown = true;
     console.log("Closing all socket connections");
+
+    // Close WebRTC connections if available
+    if (this.server.webrtcManager) {
+      this.server.webrtcManager.closeAllConnections();
+    }
 
     // Close server-side socket.io instance
     if (this.io) {
@@ -214,6 +271,7 @@ class SocketManager {
     this.socketsByUrl = {};
     this.urlToPeerId = {};
     this.peerIdToUrl = {};
+    this.webrtcPeers = {};
 
     console.log("All socket connections closed");
   }
@@ -236,6 +294,7 @@ class SocketManager {
       (id) => id !== this.server.serverID
     );
     const urlPeers = Object.keys(this.socketsByUrl);
+    const webrtcPeers = Object.keys(this.webrtcPeers);
 
     // Process data before sending
     let dataToSend = { ...data };
@@ -259,7 +318,24 @@ class SocketManager {
     const sentToPeers = new Set();
     let peerCount = 0;
 
-    // First, send by peer ID (these are confirmed peers)
+    // First, try WebRTC connections if enabled
+    if (this.webrtcEnabled && this.server.webrtcManager) {
+      for (const peerId of webrtcPeers) {
+        // Skip ourselves
+        if (peerId === this.server.serverID) continue;
+
+        // Skip if already sent
+        if (sentToPeers.has(peerId)) continue;
+
+        // Send via WebRTC
+        if (this.server.webrtcManager.sendToPeer(peerId, event, dataToSend)) {
+          sentToPeers.add(peerId);
+          peerCount++;
+        }
+      }
+    }
+
+    // Then, send by peer ID (these are confirmed peers)
     for (const peerId of idPeers) {
       // Skip ourselves
       if (peerId === this.server.serverID) continue;
@@ -270,7 +346,7 @@ class SocketManager {
       // Get the socket
       const socket = this.sockets[peerId];
       if (socket && socket.connected) {
-        socket.emit(event, data);
+        socket.emit(event, dataToSend);
         sentToPeers.add(peerId);
         peerCount++;
       }
@@ -281,13 +357,13 @@ class SocketManager {
       // Get the peer ID if known
       const peerId = this.urlToPeerId[url];
 
-      // Skip if we already sent to this peer by ID
+      // Skip if we already sent to this peer by ID or WebRTC
       if (peerId && sentToPeers.has(peerId)) continue;
 
       // Get the socket
       const socket = this.socketsByUrl[url];
       if (socket && socket.connected) {
-        socket.emit(event, data);
+        socket.emit(event, dataToSend);
         if (peerId) sentToPeers.add(peerId);
         peerCount++;
       }
@@ -296,20 +372,21 @@ class SocketManager {
     console.log(
       `Broadcasting ${event} for ${
         data.path || "general message"
-      } to ${peerCount} peers`
+      } to ${peerCount} peers (${sentToPeers.size} unique)`
     );
     return peerCount;
   }
 
   /**
-   * Get the connection status
-   * @returns {Object} - Connection status
+   * Get connection status information
+   * @returns {Object} - Connection status info
    */
   getConnectionStatus() {
     return {
       peersById: Object.keys(this.sockets),
       peersByUrl: Object.keys(this.socketsByUrl),
       peerCount: Object.keys(this.sockets).length,
+      webrtcPeers: Object.keys(this.webrtcPeers),
     };
   }
 }
