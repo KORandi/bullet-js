@@ -5,7 +5,6 @@
 
 const express = require("express");
 const { createServer } = require("http");
-const { randomBytes } = require("crypto");
 
 // Import core managers
 const DatabaseManager = require("./database-manager");
@@ -29,7 +28,7 @@ class P2PServer {
     validateConfig(config);
 
     // Server identification and configuration
-    this.serverID = randomBytes(8).toString("hex");
+    this.serverID = config.serverID;
     this.port = config.port;
     this.dbPath = config.dbPath;
     this.peers = config.peers || [];

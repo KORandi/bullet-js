@@ -1,3 +1,4 @@
+const { randomBytes } = require("crypto");
 /**
  * Configuration module for P2P Server
  * Provides default configuration and validation
@@ -13,6 +14,7 @@ function getDefaultConfig() {
     port: 3000,
     dbPath: "./db",
     peers: [],
+    serverID: randomBytes(8).toString("hex"),
 
     // Sync configuration
     sync: {
