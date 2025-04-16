@@ -57,13 +57,6 @@ class SocketManager {
           this.peerIdToUrl[peerId] = peerUrl;
           this.urlToPeerId[peerUrl] = peerId;
           console.log(`Mapped peer ${peerId} to URL ${peerUrl}`);
-
-          if (!this.server.peers.includes(peerUrl)) {
-            this.server.peers.push(peerUrl);
-
-            // Establish an outgoing connection as well
-            this.connectToPeers([peerUrl]);
-          }
         }
 
         console.log(`Peer identified: ${peerId} at ${peerUrl || "unknown"}`);

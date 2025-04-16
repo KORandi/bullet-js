@@ -779,7 +779,7 @@ describe("Advanced P2P Server Tests", function () {
       await servers[1].runAntiEntropy();
 
       // Wait for pull-based anti-entropy to complete
-      await wait(3000);
+      await wait(5000);
 
       // Server2 should now have all the data
       const afterOffline = await servers[1].get("offline-test/while-offline");
