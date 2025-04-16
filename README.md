@@ -1,3 +1,5 @@
+A little bit outdated. I am going to update as soon as possible (togheter with examples). However I keep tests up to date, so you can find some inspiration there
+
 # P2P Data Synchronization Server
 
 A lightweight, distributed peer-to-peer data synchronization server built with Node.js. This system allows multiple nodes to maintain synchronized data across a partially connected network, with automatic data propagation, subscriptions, and querying capabilities.
