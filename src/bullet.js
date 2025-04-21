@@ -1,16 +1,37 @@
+/**
+ * Bullet.js - Core class for the distributed graph database
+ */
+
 const BulletNetwork = require("./bullet-network");
 const BulletStorage = require("./bullet-storage");
 const BulletQuery = require("./bullet-query");
 const BulletValidation = require("./bullet-validation");
 const BulletMiddleware = require("./bullet-middleware");
 const BulletSerializer = require("./bullet-serializer");
+
+// Conditionally require LevelDB storage to avoid dependency if not used
+let BulletLevelDBStorage = null;
+try {
+  // First, check if level package is available
+  require.resolve("level");
+  // If that doesn't throw, load our LevelDB storage
+  BulletLevelDBStorage = require("./bullet-leveldb-storage");
+} catch (err) {
+  // LevelDB dependency is optional
+  console.log(
+    "LevelDB dependency not available. LevelDB storage will be disabled."
+  );
+}
+
 class Bullet {
   constructor(options = {}) {
     this.options = {
       peers: [],
       server: true,
       storage: true,
+      storageType: "file", // "file" or "leveldb"
       storagePath: "./.bullet",
+      leveldbPath: "./.bullet-leveldb",
       encrypt: false,
       encryptionKey: null,
       enableIndexing: true,
@@ -46,12 +67,34 @@ class Bullet {
     }
 
     // Initialize storage if available and enabled
-    if (BulletStorage && this.options.storage) {
-      this.storage = new BulletStorage(this, {
-        path: this.options.storagePath,
-        encrypt: this.options.encrypt,
-        encryptionKey: this.options.encryptionKey,
-      });
+    if (this.options.storage) {
+      if (this.options.storageType === "leveldb") {
+        if (BulletLevelDBStorage) {
+          this.storage = new BulletLevelDBStorage(this, {
+            path: this.options.leveldbPath || this.options.storagePath,
+            encrypt: this.options.encrypt,
+            encryptionKey: this.options.encryptionKey,
+          });
+        } else {
+          console.warn(
+            "LevelDB storage requested but module not available. Falling back to file storage."
+          );
+          if (BulletStorage) {
+            this.storage = new BulletStorage(this, {
+              path: this.options.storagePath,
+              encrypt: this.options.encrypt,
+              encryptionKey: this.options.encryptionKey,
+            });
+          }
+        }
+      } else if (BulletStorage) {
+        // Default to file storage
+        this.storage = new BulletStorage(this, {
+          path: this.options.storagePath,
+          encrypt: this.options.encrypt,
+          encryptionKey: this.options.encryptionKey,
+        });
+      }
     }
 
     // Initialize query and indexing if enabled

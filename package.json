@@ -12,7 +12,8 @@
     "examples:validation": "node examples/bullet-validation-example.js",
     "examples:middleware": "node examples/bullet-middleware-example.js",
     "examples:serializer": "node examples/bullet-serializer-example.js",
-    "examples:circle-network": "node examples/bullet-circle-network-example.js"
+    "examples:circle-network": "node examples/bullet-circle-network-example.js",
+    "examples:leveldb": "node examples/bullet-leveldb-example.js"
   },
   "keywords": [
     "database",
@@ -25,8 +26,9 @@
   "author": "Your Name",
   "license": "MIT",
   "dependencies": {
-    "ws": "^8.13.0",
-    "crypto": "^1.0.1"
+    "crypto": "^1.0.1",
+    "level": "^8.0.1",
+    "ws": "^8.13.0"
   },
   "devDependencies": {
     "eslint": "^8.40.0",
