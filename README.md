@@ -1,272 +1,161 @@
-A little bit outdated. I am going to update as soon as possible (togheter with examples). However I keep tests up to date, so you can find some inspiration there
+# Bullet.js
 
-# P2P Data Synchronization Server
+A distributed graph database inspired by Gun.js, designed for simplicity, performance, and flexibility.
 
-A lightweight, distributed peer-to-peer data synchronization server built with Node.js. This system allows multiple nodes to maintain synchronized data across a partially connected network, with automatic data propagation, subscriptions, and querying capabilities.
+## Overview
 
-## Features
+Bullet.js is a modular, real-time, distributed graph database that enables collaborative applications with offline capability. It provides a clean and intuitive API for storing, retrieving, and synchronizing data across peers, with built-in support for validation, querying, middleware, and more.
 
-- **Peer-to-peer architecture**: No central server required
-- **Automatic data synchronization**: Changes propagate throughout the network
-- **Conflict resolution strategies**: Multiple ways to handle concurrent updates
-- **Vector clock causality tracking**: Accurately detect concurrent modifications
-- **Subscription system**: Get notified when data changes
-- **Multi-hop forwarding**: Updates reach all nodes even in partially connected networks
-- **Path-based data model**: Organize data hierarchically using path prefixes
-- **Scan operations**: Query data based on path prefixes
-- **WebSocket-based communication**: Real-time updates between peers
-- **HTTP API**: Simple REST interface for external integrations
+## Key Features
 
-## Project Structure
-
-The project has been restructured for better organization and separation of concerns:
-
-```
-p2p-server/
-├── src/
-│   ├── core/                     # Core functionality
-│   │   ├── server.js             # Main server class
-│   │   ├── database-manager.js   # Database operations
-│   │   └── config.js             # Configuration defaults and validation
-│   │
-│   ├── network/                  # Network layer
-│   │   ├── socket-manager.js     # WebSocket connections
-│   │   ├── api-routes.js         # HTTP API routes
-│   │   └── message-handlers.js   # Message processing logic
-│   │
-│   ├── sync/                     # Synchronization logic
-│   │   ├── sync-manager.js       # Synchronization orchestration
-│   │   ├── vector-clock.js       # Vector clock implementation
-│   │   ├── conflict-resolver.js  # Conflict resolution strategies
-│   │   └── anti-entropy.js       # Anti-entropy process
-│   │
-│   └── index.js                  # Main entry point
-│
-├── examples/                     # Example implementations
-│   ├── basic-example.js          # Simple 2-peer example
-│   └── complex-network.js        # Multi-node network example
-```
+- **Distributed Architecture**: Peer-to-peer synchronization with automatic conflict resolution
+- **Modular Design**: Use only the components you need
+- **Validation**: Schema-based data validation to ensure data integrity
+- **Query System**: Fast lookups with indexing and filter capabilities
+- **Middleware**: Customize behavior with middleware hooks
+- **Serialization**: Import/export data in various formats (JSON, CSV, XML)
+- **Persistence**: Data storage with optional encryption
+- **Event System**: Subscribe to changes in real-time
 
 ## Installation
 
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/p2p-server.git
-cd p2p-server
-
-# Install dependencies
-npm install
+npm install bullet-js
 ```
 
-## Quick Start
-
-Create a new file with the following code:
+## Basic Usage
 
 ```javascript
-const { createServer } = require("./src");
+const Bullet = require("bullet-js");
 
-// Create two server instances
-const server1 = createServer({
-  port: 3001,
-  dbPath: "./db-server1",
-  peers: [], // No peers initially
+// Initialize a Bullet instance
+const bullet = new Bullet({
+  peers: ["ws://peer1.example.com", "ws://peer2.example.com"],
+  storage: true,
+  storagePath: "./data",
 });
 
-const server2 = createServer({
-  port: 3002,
-  dbPath: "./db-server2",
-  peers: ["http://localhost:3001"], // Connect to server1
+// Store data
+bullet.get("users/alice").put({
+  name: "Alice",
+  email: "alice@example.com",
+  role: "admin",
 });
 
-// Start both servers
-async function start() {
-  await server1.start();
-  await server2.start();
+// Retrieve data
+bullet.get("users/alice").on((userData) => {
+  console.log("User data:", userData);
+});
 
-  // Store data on server1
-  await server1.put("test/key", { message: "Hello P2P World!" });
+// Query data
+const admins = bullet.equals("users", "role", "admin");
+console.log(
+  "Admin users:",
+  admins.map((node) => node.value().name)
+);
 
-  // Wait for synchronization
-  setTimeout(async () => {
-    // Retrieve data from server2
-    const data = await server2.get("test/key");
-    console.log("Data synchronized:", data);
-
-    // Clean up
-    await server1.close();
-    await server2.close();
-  }, 1000);
-}
-
-start();
-```
-
-Run the example:
-
-```bash
-node your-file.js
+// Use middleware
+bullet.beforePut((path, data) => {
+  console.log(`Data being written to ${path}:`, data);
+  return data;
+});
 ```
 
 ## API Reference
 
-### Creating a Server
+### Core API
+
+- `new Bullet(options)`: Create a new Bullet instance
+- `bullet.get(path)`: Access a node at the specified path
+- `bullet.close()`: Close connections and clean up resources
+
+### Node API
+
+- `node.put(data)`: Write data to the node
+- `node.value()`: Get the current value of the node
+- `node.on(callback)`: Subscribe to changes on the node
+- `node.off(callback)`: Unsubscribe from changes
+- `node.get(childPath)`: Access a child node
+- `node.delete()`: Delete the node
+
+### Query API
+
+- `bullet.index(path, field)`: Create an index for faster queries
+- `bullet.equals(path, field, value)`: Find nodes with a specific value
+- `bullet.range(path, field, min, max)`: Find nodes within a value range
+- `bullet.filter(path, filterFn)`: Apply a custom filter function
+- `bullet.find(path, predicateFn)`: Find the first matching node
+
+### Validation API
+
+- `bullet.defineSchema(name, schema)`: Define a data schema
+- `bullet.applySchema(path, schemaName)`: Apply a schema to a path
+- `bullet.validate(schemaName, data)`: Validate data against a schema
+- `bullet.onValidationError(type, handler)`: Register validation error handler
+
+### Middleware API
+
+- `bullet.use(operation, middleware)`: Register middleware for an operation
+- `bullet.beforePut(middleware)`: Register middleware before data writes
+- `bullet.afterPut(middleware)`: Register middleware after data writes
+- `bullet.onGet(middleware)`: Register middleware for data reads
+- `bullet.afterGet(middleware)`: Register middleware after data reads
+- `bullet.on(event, listener)`: Register event listener
+
+### Serialization API
+
+- `bullet.exportToJSON(path, options)`: Export data to JSON
+- `bullet.importFromJSON(json, targetPath, options)`: Import data from JSON
+- `bullet.exportToCSV(path, options)`: Export data to CSV
+- `bullet.importFromCSV(csv, targetPath, options)`: Import data from CSV
+- `bullet.exportToXML(path, options)`: Export data to XML
+- `bullet.importFromXML(xml, targetPath, options)`: Import data from XML
+
+## Configuration Options
 
 ```javascript
-const { createServer } = require("p2p-server");
+const bullet = new Bullet({
+  // Networking options
+  peers: [], // Array of peer WebSocket URLs
+  server: true, // Whether to run a WebSocket server
+  port: 8765, // WebSocket server port
 
-const server = createServer({
-  port: 3000, // HTTP port to listen on
-  dbPath: "./db", // Path for the LevelDB database
-  peers: ["http://..."], // URLs of peers to connect to
+  // Storage options
+  storage: true, // Enable persistence
+  storagePath: "./.bullet", // Path for persistent storage
+  encrypt: false, // Enable storage encryption
+  encryptionKey: null, // Encryption key
 
-  // Optional advanced configuration
-  sync: {
-    antiEntropyInterval: 60000, // Anti-entropy sync interval (ms)
-    maxMessageAge: 300000, // Time to keep processed messages (ms)
-    maxVersions: 10, // Maximum versions to keep in history
-  },
-
-  conflict: {
-    defaultStrategy: "last-write-wins", // Default conflict resolution
-    pathStrategies: {
-      // Per-path strategies
-      users: "merge-fields",
-      settings: "first-write-wins",
-    },
-  },
+  // Feature toggles
+  enableIndexing: true, // Enable query capabilities
+  enableValidation: true, // Enable schema validation
+  enableMiddleware: true, // Enable middleware system
+  enableSerializer: true, // Enable serialization capabilities
 });
 ```
 
-### Basic Operations
+## Examples
 
-```javascript
-// Start the server
-await server.start();
+Check out the example scripts in the repository:
 
-// Store data
-await server.put("users/user1", { name: "Alice", age: 30 });
+- `bullet-query-example.js`: Demonstrates query capabilities
+- `bullet-validation-example.js`: Shows schema validation
+- `bullet-middleware-example.js`: Illustrates middleware usage
+- `bullet-serializer-example.js`: Demonstrates data serialization
 
-// Retrieve data
-const user = await server.get("users/user1");
-
-// Delete data
-await server.del("users/user1");
-
-// Scan data by prefix
-const users = await server.scan("users/");
-
-// Subscribe to changes
-const unsubscribe = await server.subscribe("users", (value, path) => {
-  console.log(`Data at ${path} changed to:`, value);
-});
-
-// Later, unsubscribe
-unsubscribe();
-
-// Close the server
-await server.close();
-```
-
-### Conflict Resolution Strategies
-
-The system provides multiple built-in conflict resolution strategies:
-
-1. **last-write-wins**: Uses timestamps to determine the winner. The update with the newer timestamp wins.
-
-2. **first-write-wins**: Opposite of last-write-wins. The update with the older timestamp wins. Useful for configuration data that should be stable once set.
-
-3. **merge-fields**: For object values, merges fields from both updates. For fields present in both objects, it uses the one with the newer timestamp.
-
-4. **custom**: Use a custom resolver function for complex scenarios.
-
-Example of setting conflict strategies:
-
-```javascript
-// Set strategy during server creation
-const server = createServer({
-  // ...other options
-  conflict: {
-    defaultStrategy: "last-write-wins",
-    pathStrategies: {
-      users: "merge-fields",
-      settings: "first-write-wins",
-      inventory: "custom",
-    },
-  },
-});
-
-// Register a custom resolver
-server.registerConflictResolver("inventory", (path, localData, remoteData) => {
-  // Custom conflict resolution logic
-  // Example: take the minimum inventory level to be safe
-  const minStock = Math.min(localData.value.stock, remoteData.value.stock);
-
-  // Use the newer timestamp for the result
-  const result =
-    localData.timestamp >= remoteData.timestamp
-      ? { ...localData }
-      : { ...remoteData };
-
-  // Override with minimum stock
-  result.value = { ...result.value, stock: minStock };
-
-  return result;
-});
-```
-
-## Architecture Components
-
-### P2PServer
-
-The main server class that coordinates the other components and provides the public API.
-
-### SocketManager
-
-Handles peer connections, manages sockets, and coordinates message passing between peers.
-
-### SyncManager
-
-Manages data synchronization, processes updates, handles subscriptions, and coordinates conflict resolution.
-
-### DatabaseManager
-
-Handles persistence using LevelDB, including storing, retrieving, and scanning data.
-
-### VectorClock
-
-Implements vector clocks for causality tracking between nodes.
-
-### ConflictResolver
-
-Handles detection and resolution of concurrent updates with configurable strategies.
-
-### AntiEntropy
-
-Implements periodic synchronization to ensure data consistency, even when normal message propagation fails.
-
-## REST API Endpoints
-
-The server automatically sets up these HTTP endpoints:
-
-- `GET /api/:path(*)` - Get data at path
-- `PUT /api/:path(*)` - Store data at path
-- `DELETE /api/:path(*)` - Delete data at path
-- `GET /api/scan/:prefix(*)` - Scan data with prefix
-- `GET /api/history/:path(*)` - Get version history for path
-- `GET /api/status` - Get server status and vector clock info
-
-## Running the Examples
-
-The project includes several examples to demonstrate different features:
+Run examples with:
 
 ```bash
-# Basic example with two nodes
-node examples/basic-example.js
-
-# Advanced example with complex network topology
-node examples/complex-network.js
+npm run examples:query
+npm run examples:validation
+npm run examples:middleware
+npm run examples:serializer
 ```
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-MIT
+This project is licensed under the MIT License - see the LICENSE file for details.
