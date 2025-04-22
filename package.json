@@ -13,6 +13,8 @@
     "examples:middleware": "node examples/bullet-middleware-example.js",
     "examples:serializer": "node examples/bullet-serializer-example.js",
     "examples:circle-network": "node examples/bullet-circle-network-example.js",
+    "examples:bridge-network": "node examples/bullet-bridge-example.js",
+    "examples:chain-network": "node examples/bullet-chain-example.js",
     "examples:leveldb": "node examples/bullet-leveldb-example.js"
   },
   "keywords": [
