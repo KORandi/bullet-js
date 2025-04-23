@@ -1,5 +1,6 @@
 /**
  * Bullet-Network.js - Networking layer for Bullet.js
+ * A true peer-to-peer networking implementation with no server/client distinction
  */
 
 const EventEmitter = require("events");
@@ -16,29 +17,44 @@ class BulletNetwork extends EventEmitter {
       maxTTL: 32,
       messageCacheSize: 10000,
       syncInterval: 30000,
-      batchSize: 200,
+      batchSize: 100,
       batchDelay: 500,
       ...options,
     };
 
-    this.connections = new Map();
-    this.lastSync = {};
-    this.messageQueue = [];
+    // Local peer identifier
+    this.localPeerId = this.bullet.id;
+
+    // Track peers using consistent identifiers
+    // Maps peer IDs to peer context objects
+    this.peers = new Map();
+
+    // Track active websocket server
+    this.server = null;
+
+    // Track processed message IDs to prevent loops
     this.processedMessages = new Set();
+
+    // Track active sync sessions
     this.activeSyncBatches = new Map();
 
+    // Start listening for connections if not disabled
     if (this.options.server !== false) {
-      this._initServer();
+      this._startListening();
     }
 
+    // Connect to known peers
     this._connectToPeers();
+
+    // Start sync cycle
+    this._startSyncCycle();
   }
 
   /**
-   * Initialize WebSocket server
+   * Start listening for incoming connections
    * @private
    */
-  _initServer() {
+  _startListening() {
     try {
       this.server = new WebSocket.Server({
         port: this.options.port,
@@ -46,29 +62,77 @@ class BulletNetwork extends EventEmitter {
       });
 
       console.log(
-        `Bullet server listening on ${this.options.host}:${this.options.port}`
+        `Bullet network listening on ${this.options.host}:${this.options.port}`
       );
 
       this.server.on("connection", (socket, req) => {
-        const peerId =
-          req.headers["x-peer-id"] ||
-          `peer-${Math.random().toString(36).substr(2, 9)}`;
-        console.log(`New peer connected: ${peerId}`);
-
-        this._handleNewPeer(socket, peerId);
+        this._handleIncomingConnection(socket, req);
       });
 
       this.server.on("error", (error) => {
-        console.error("Server error:", error);
+        console.error("WebSocket server error:", error);
         this.emit("error", error);
       });
     } catch (err) {
-      console.error("Failed to initialize server:", err);
+      console.error("Failed to start WebSocket server:", err);
     }
   }
 
   /**
-   * Connect to configured peers
+   * Handle incoming connection from another peer
+   * @param {WebSocket} socket - WebSocket connection
+   * @param {Object} req - HTTP request object
+   * @private
+   */
+  _handleIncomingConnection(socket, req) {
+    const remotePeerId = req.headers["x-peer-id"];
+
+    if (!remotePeerId) {
+      console.warn("Rejecting connection with no peer ID");
+      socket.close();
+      return;
+    }
+
+    // Don't connect to self
+    if (remotePeerId === this.localPeerId) {
+      console.warn("Rejecting connection from self");
+      socket.close();
+      return;
+    }
+
+    console.log(`Incoming connection from peer: ${remotePeerId}`);
+
+    // Check if we already have a connection with this peer
+    const existingPeer = this.peers.get(remotePeerId);
+
+    if (
+      existingPeer &&
+      existingPeer.socket &&
+      existingPeer.socket.readyState === WebSocket.OPEN
+    ) {
+      // We already have a connection to this peer
+      // If we initiated the connection (outbound is true), keep our connection
+      // If the remote peer initiated the connection (outbound is false), use their connection
+      if (existingPeer.outbound) {
+        console.log(
+          `Already have outbound connection to ${remotePeerId}. Closing incoming connection.`
+        );
+        socket.close();
+        return;
+      } else {
+        console.log(
+          `Replacing existing inbound connection from ${remotePeerId}`
+        );
+        existingPeer.socket.close();
+      }
+    }
+
+    // Setup the peer connection
+    this._setupPeerConnection(socket, remotePeerId, false);
+  }
+
+  /**
+   * Connect to configured peer list
    * @private
    */
   _connectToPeers() {
@@ -82,48 +146,114 @@ class BulletNetwork extends EventEmitter {
   }
 
   /**
-   * Connect to a specific peer
+   * Connect to a specific peer by URL
    * @param {string} peerUrl - WebSocket URL of the peer
    * @private
    */
   _connectToPeer(peerUrl) {
     try {
-      console.log(`Connecting to peer: ${peerUrl}`);
+      console.log(`Initiating outbound connection to peer: ${peerUrl}`);
 
       const socket = new WebSocket(peerUrl, {
         headers: {
-          "x-peer-id": this.bullet.id,
+          "x-peer-id": this.localPeerId,
         },
       });
 
       socket.on("open", () => {
-        console.log(`Connected to peer: ${peerUrl}`);
-        this._handleNewPeer(socket, peerUrl);
+        console.log(`Connected to peer at ${peerUrl}`);
 
-        this._sendSyncRequest(socket);
+        // Handle initial handshake
+        socket.send(
+          JSON.stringify({
+            type: "handshake",
+            id: this._generateId(),
+            peerId: this.localPeerId,
+            timestamp: Date.now(),
+          })
+        );
+
+        // Wait for handshake response to establish peer ID
+        const handleHandshake = (message) => {
+          try {
+            const data = JSON.parse(message);
+
+            if (
+              data.type === "handshake" ||
+              data.type === "handshake-response"
+            ) {
+              const remotePeerId = data.peerId;
+
+              if (!remotePeerId) {
+                console.warn("Received handshake without peer ID");
+                socket.close();
+                return;
+              }
+
+              // Don't connect to self
+              if (remotePeerId === this.localPeerId) {
+                console.warn("Connected to self, closing connection");
+                socket.close();
+                return;
+              }
+
+              // Remove this one-time handler
+              socket.removeListener("message", handleHandshake);
+
+              // Setup the connection with the correct peer ID
+              this._setupPeerConnection(socket, remotePeerId, true, peerUrl);
+
+              // Initiate sync
+              this._sendSyncRequest(remotePeerId);
+            }
+          } catch (err) {
+            console.error("Error handling handshake:", err);
+          }
+        };
+
+        socket.on("message", handleHandshake);
       });
 
       socket.on("error", (error) => {
         console.error(`Error connecting to peer ${peerUrl}:`, error);
 
+        // Try reconnecting after delay
         setTimeout(() => {
           this._connectToPeer(peerUrl);
         }, 5000);
       });
     } catch (err) {
       console.error(`Failed to connect to peer ${peerUrl}:`, err);
+
+      // Try reconnecting after delay
+      setTimeout(() => {
+        this._connectToPeer(peerUrl);
+      }, 5000);
     }
   }
 
   /**
-   * Handle a new peer connection
+   * Setup peer connection with consistent handling
    * @param {WebSocket} socket - WebSocket connection
-   * @param {string} peerId - Unique identifier for the peer
+   * @param {string} peerId - Remote peer ID
+   * @param {boolean} outbound - Whether we initiated the connection
+   * @param {string} peerUrl - Optional URL for reconnection (for outbound connections)
    * @private
    */
-  _handleNewPeer(socket, peerId) {
-    this.connections.set(peerId, socket);
+  _setupPeerConnection(socket, peerId, outbound, peerUrl = null) {
+    // Store information about this peer
+    const peerInfo = {
+      peerId,
+      socket,
+      outbound,
+      url: peerUrl,
+      connectedAt: Date.now(),
+      lastSyncAt: 0,
+    };
 
+    this.peers.set(peerId, peerInfo);
+
+    // Setup message handler
     socket.on("message", (message) => {
       try {
         const data = JSON.parse(message);
@@ -133,36 +263,66 @@ class BulletNetwork extends EventEmitter {
       }
     });
 
+    // Setup disconnect handler
     socket.on("close", () => {
       console.log(`Peer disconnected: ${peerId}`);
-      this.connections.delete(peerId);
 
-      if (this.options.peers.includes(peerId)) {
+      // Remove from active peers
+      this.peers.delete(peerId);
+
+      // Clean up any active sync sessions
+      this.activeSyncBatches.delete(peerId);
+
+      // Try to reconnect if this was in our peer list
+      if (outbound && peerUrl && this.options.peers.includes(peerUrl)) {
+        console.log(`Will attempt to reconnect to ${peerUrl} in 5 seconds`);
         setTimeout(() => {
-          this._connectToPeer(peerId);
+          this._connectToPeer(peerUrl);
         }, 5000);
       }
     });
 
+    // Send handshake-response if this was an inbound connection
+    if (!outbound) {
+      socket.send(
+        JSON.stringify({
+          type: "handshake-response",
+          id: this._generateId(),
+          peerId: this.localPeerId,
+          timestamp: Date.now(),
+        })
+      );
+    }
+
+    // Emit peer connect event
     this.emit("peer:connect", peerId);
+
+    console.log(
+      `Peer connection established with ${peerId} (${
+        outbound ? "outbound" : "inbound"
+      })`
+    );
   }
 
   /**
    * Handle messages from peers
-   * @param {string} peerId - Unique identifier for the peer
+   * @param {string} peerId - Remote peer ID
    * @param {Object} message - Message object
    * @private
    */
   _handlePeerMessage(peerId, message) {
     if (!message || !message.type) return;
 
+    // Deduplicate messages
     if (message.id && this.processedMessages.has(message.id)) {
       return;
     }
 
+    // Mark message as processed
     if (message.id) {
       this.processedMessages.add(message.id);
 
+      // Prune processed message cache if it gets too large
       if (this.processedMessages.size > this.options.messageCacheSize) {
         const iterator = this.processedMessages.values();
         for (let i = 0; i < this.options.messageCacheSize / 10; i++) {
@@ -171,7 +331,13 @@ class BulletNetwork extends EventEmitter {
       }
     }
 
+    // Handle message based on type
     switch (message.type) {
+      case "handshake":
+      case "handshake-response":
+        // Handshake messages handled during connection setup
+        break;
+
       case "sync-request":
         this._handleSyncRequest(peerId, message);
         break;
@@ -195,19 +361,22 @@ class BulletNetwork extends EventEmitter {
 
   /**
    * Handle sync request from a peer
-   * @param {string} peerId - Unique identifier for the peer
+   * @param {string} peerId - Remote peer ID
    * @param {Object} message - Message object
    * @private
    */
   _handleSyncRequest(peerId, message) {
-    const socket = this.connections.get(peerId);
-    if (!socket) return;
+    const peer = this.peers.get(peerId);
+    if (!peer || !peer.socket || peer.socket.readyState !== WebSocket.OPEN) {
+      return;
+    }
 
     const requestId = message.requestId || this._generateId();
     const lastSync = message.lastSync || {};
 
+    // Check if we're already in a sync session with this peer
     if (this.activeSyncBatches.has(peerId)) {
-      socket.send(
+      peer.socket.send(
         JSON.stringify({
           id: this._generateId(),
           type: "sync-status",
@@ -219,10 +388,12 @@ class BulletNetwork extends EventEmitter {
       return;
     }
 
+    // Get all updates since last sync
     const allUpdates = this._getUpdatesSince(lastSync);
 
+    // If no updates, send empty sync response
     if (allUpdates.length === 0) {
-      socket.send(
+      peer.socket.send(
         JSON.stringify({
           id: this._generateId(),
           type: "sync-data",
@@ -237,8 +408,10 @@ class BulletNetwork extends EventEmitter {
       return;
     }
 
+    // Calculate batching requirements
     const totalBatches = Math.ceil(allUpdates.length / this.options.batchSize);
 
+    // Store sync session state
     this.activeSyncBatches.set(peerId, {
       updates: allUpdates,
       requestId: requestId,
@@ -247,17 +420,18 @@ class BulletNetwork extends EventEmitter {
       startTime: Date.now(),
     });
 
+    // Start sending batches
     this._sendNextSyncBatch(peerId);
   }
 
   /**
    * Send the next batch of sync data to a peer
-   * @param {string} peerId - Unique identifier for the peer
+   * @param {string} peerId - Remote peer ID
    * @private
    */
   _sendNextSyncBatch(peerId) {
-    const socket = this.connections.get(peerId);
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
+    const peer = this.peers.get(peerId);
+    if (!peer || !peer.socket || peer.socket.readyState !== WebSocket.OPEN) {
       this.activeSyncBatches.delete(peerId);
       return;
     }
@@ -267,15 +441,15 @@ class BulletNetwork extends EventEmitter {
 
     const { updates, requestId, totalBatches, currentBatch } = batchInfo;
 
+    // Prepare batch slice
     const start = currentBatch * this.options.batchSize;
     const end = Math.min(start + this.options.batchSize, updates.length);
-
     const batchUpdates = updates.slice(start, end);
-
     const isLastBatch = currentBatch === totalBatches - 1;
 
     try {
-      socket.send(
+      // Send batch
+      peer.socket.send(
         JSON.stringify({
           id: this._generateId(),
           type: "sync-data",
@@ -294,8 +468,10 @@ class BulletNetwork extends EventEmitter {
         }/${totalBatches} to ${peerId} with ${batchUpdates.length} updates`
       );
 
+      // Increment batch counter
       batchInfo.currentBatch++;
 
+      // Clean up if this was the last batch
       if (isLastBatch) {
         this.activeSyncBatches.delete(peerId);
         console.log(`Completed batched sync with ${peerId}`);
@@ -308,7 +484,7 @@ class BulletNetwork extends EventEmitter {
 
   /**
    * Handle sync data from a peer
-   * @param {string} peerId - Unique identifier for the peer
+   * @param {string} peerId - Remote peer ID
    * @param {Object} message - Message object
    * @private
    */
@@ -330,9 +506,11 @@ class BulletNetwork extends EventEmitter {
       const currentData = this.bullet._getData(update.path);
       const currentMeta = this.bullet.meta[update.path] || { timestamp: 0 };
 
+      // Only apply if the update is newer
       if (update.timestamp > currentMeta.timestamp) {
         this.bullet._setData(update.path, update.data, update.timestamp, false);
 
+        // Update metadata
         this.bullet.meta[update.path] = {
           timestamp: update.timestamp,
           source: peerId,
@@ -341,25 +519,23 @@ class BulletNetwork extends EventEmitter {
     });
 
     // Update last sync timestamp for this peer
-    this.lastSync[peerId] = message.timestamp;
-
-    // Send acknowledgment for this batch
-    const socket = this.connections.get(peerId);
-    if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(
-        JSON.stringify({
-          id: this._generateId(),
-          type: "sync-ack",
-          requestId: requestId,
-          batchIndex: batchIndex,
-          totalBatches: totalBatches,
-          status: "processed",
-          timestamp: Date.now(),
-        })
-      );
+    const peer = this.peers.get(peerId);
+    if (peer) {
+      peer.lastSyncAt = message.timestamp;
     }
 
-    // If this was the last batch, log completion
+    // Send acknowledgment for this batch
+    this._sendToPeer(peerId, {
+      id: this._generateId(),
+      type: "sync-ack",
+      requestId: requestId,
+      batchIndex: batchIndex,
+      totalBatches: totalBatches,
+      status: "processed",
+      timestamp: Date.now(),
+    });
+
+    // Log completion if this was the last batch
     if (isComplete) {
       console.log(
         `Completed receiving sync from ${peerId}: ${totalBatches} batches`
@@ -369,7 +545,7 @@ class BulletNetwork extends EventEmitter {
 
   /**
    * Handle sync acknowledgment from a peer
-   * @param {string} peerId - Unique identifier for the peer
+   * @param {string} peerId - Remote peer ID
    * @param {Object} message - Message object
    * @private
    */
@@ -405,7 +581,7 @@ class BulletNetwork extends EventEmitter {
 
     // Check if there are more batches to send
     if (batchInfo.currentBatch < batchInfo.totalBatches) {
-      // Schedule sending the next batch
+      // Schedule sending the next batch with a delay
       setTimeout(() => {
         this._sendNextSyncBatch(peerId);
       }, this.options.batchDelay);
@@ -420,28 +596,33 @@ class BulletNetwork extends EventEmitter {
 
   /**
    * Handle put operation from a peer
-   * @param {string} peerId - Unique identifier for the peer
+   * @param {string} peerId - Remote peer ID
    * @param {Object} message - Message object
    * @private
    */
   _handlePut(peerId, message) {
     const { path, data, timestamp, ttl } = message;
 
+    // Check TTL to prevent infinite message propagation
     if (ttl !== undefined && ttl <= 0) {
       return;
     }
 
+    // Check if the update is newer than what we have
     const currentMeta = this.bullet.meta[path] || { timestamp: 0 };
 
     if (timestamp > currentMeta.timestamp) {
+      // Apply data change locally (without broadcasting)
       this.bullet._setData(path, data, timestamp, false);
 
+      // Update metadata
       this.bullet.meta[path] = {
         timestamp,
         source: peerId,
       };
 
-      this._broadcastMessage(message);
+      // Relay message to other peers
+      this._relayMessage(message, peerId);
     }
   }
 
@@ -470,57 +651,100 @@ class BulletNetwork extends EventEmitter {
   }
 
   /**
-   * Send a sync request to a peer
-   * @param {WebSocket} socket - WebSocket connection
+   * Start the periodic sync cycle
    * @private
    */
-  _sendSyncRequest(socket) {
-    try {
-      if (socket.readyState === WebSocket.OPEN) {
-        socket.send(
-          JSON.stringify({
-            id: this._generateId(),
-            type: "sync-request",
-            lastSync: this.lastSync,
-            timestamp: Date.now(),
-          })
-        );
+  _startSyncCycle() {
+    this.syncInterval = setInterval(() => {
+      this.peers.forEach((peer, peerId) => {
+        // Skip peers with recent syncs
+        const lastSync = peer.lastSyncAt || 0;
+        const now = Date.now();
+
+        if (now - lastSync > this.options.syncInterval / 2) {
+          this._sendSyncRequest(peerId);
+        }
+      });
+    }, this.options.syncInterval);
+  }
+
+  /**
+   * Send a sync request to a peer
+   * @param {string} peerId - Remote peer ID
+   * @private
+   */
+  _sendSyncRequest(peerId) {
+    // Gather last sync timestamps for each path
+    const lastSyncTimes = {};
+
+    // Include sync times from our local transaction log
+    this.bullet.log.forEach((entry) => {
+      if (
+        !lastSyncTimes[entry.path] ||
+        lastSyncTimes[entry.path] < entry.timestamp
+      ) {
+        lastSyncTimes[entry.path] = entry.timestamp;
       }
+    });
+
+    // Send the sync request
+    this._sendToPeer(peerId, {
+      id: this._generateId(),
+      type: "sync-request",
+      requestId: this._generateId(),
+      lastSync: lastSyncTimes,
+      timestamp: Date.now(),
+    });
+  }
+
+  /**
+   * Send a message to a specific peer
+   * @param {string} peerId - Remote peer ID
+   * @param {Object} message - Message to send
+   * @private
+   */
+  _sendToPeer(peerId, message) {
+    const peer = this.peers.get(peerId);
+
+    if (!peer || !peer.socket || peer.socket.readyState !== WebSocket.OPEN) {
+      console.warn(`Cannot send to peer ${peerId}: No active connection`);
+      return false;
+    }
+
+    try {
+      peer.socket.send(JSON.stringify(message));
+      return true;
     } catch (err) {
-      console.error("Error sending sync request:", err);
+      console.error(`Error sending to peer ${peerId}:`, err);
+      return false;
     }
   }
 
   /**
-   * Broadcast a message to connected peers
-   * @param {Object} message - Message to broadcast
+   * Relay a message to all peers except the source
+   * @param {Object} message - Message to relay
+   * @param {string} sourcePeerId - Source peer ID to exclude
    * @private
    */
-  _broadcastMessage(message) {
+  _relayMessage(message, sourcePeerId) {
     if (message.ttl !== undefined && message.ttl <= 0) {
       return;
     }
 
-    const messageWithId = {
+    // Create a new message with decremented TTL
+    const relayMessage = {
       ...message,
       id: message.id || this._generateId(),
+      ttl: (message.ttl !== undefined ? message.ttl : this.options.maxTTL) - 1,
     };
 
-    if (messageWithId.ttl !== undefined) {
-      messageWithId.ttl = messageWithId.ttl - 1;
-    } else {
-      messageWithId.ttl = this.options.maxTTL - 1;
-    }
+    // Mark as processed to prevent loops
+    this.processedMessages.add(relayMessage.id);
 
-    const messageStr = JSON.stringify(messageWithId);
-
-    this.connections.forEach((socket, peerId) => {
-      try {
-        if (socket.readyState === WebSocket.OPEN) {
-          socket.send(messageStr);
-        }
-      } catch (err) {
-        console.error(`Error broadcasting to peer ${peerId}:`, err);
+    // Send to all peers except source
+    this.peers.forEach((peer, peerId) => {
+      if (peerId !== sourcePeerId) {
+        this._sendToPeer(peerId, relayMessage);
       }
     });
   }
@@ -542,18 +766,24 @@ class BulletNetwork extends EventEmitter {
       ttl: this.options.maxTTL,
     };
 
+    // Mark as processed to prevent loops
     this.processedMessages.add(message.id);
 
-    this._broadcastMessage(message);
+    // Send to all peers
+    this.peers.forEach((peer, peerId) => {
+      this._sendToPeer(peerId, message);
+    });
   }
 
   /**
-   * Generate a unique ID
+   * Generate a unique message ID
    * @return {string} - Unique ID
    * @private
    */
   _generateId() {
-    return "msg-" + Math.random().toString(36).substr(2, 9) + "-" + Date.now();
+    return `${this.localPeerId.substr(0, 8)}-${Date.now()}-${Math.random()
+      .toString(36)
+      .substr(2, 9)}`;
   }
 
   /**
@@ -561,25 +791,35 @@ class BulletNetwork extends EventEmitter {
    * @public
    */
   close() {
+    // Stop sync interval
     if (this.syncInterval) {
       clearInterval(this.syncInterval);
     }
 
-    this.connections.forEach((socket, peerId) => {
+    // Close all peer connections
+    this.peers.forEach((peer, peerId) => {
       try {
-        socket.close();
+        if (peer.socket) {
+          peer.socket.close();
+        }
       } catch (err) {
         console.error(`Error closing connection to ${peerId}:`, err);
       }
     });
 
+    // Close the server if running
     if (this.server) {
       try {
         this.server.close();
       } catch (err) {
-        console.error("Error closing server:", err);
+        console.error("Error closing WebSocket server:", err);
       }
     }
+
+    // Clear all state
+    this.peers.clear();
+    this.activeSyncBatches.clear();
+    this.processedMessages.clear();
 
     console.log("BulletNetwork closed");
   }

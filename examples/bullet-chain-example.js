@@ -122,12 +122,12 @@ function createPeerNode(nodeId, port, peerUrls, position) {
       // Update node data
       const currentData = bullet.get(nodePath).value() || {};
       
-      // bullet.get(nodePath).put({
-      //   ...currentData,
-      //   dataUpdates: (currentData.dataUpdates || 0) + 1,
-      //   lastUpdate: new Date().toISOString(),
-      //   message: \`Hello from Node ${nodeId} at \${new Date().toISOString()}\`
-      // });
+      bullet.get(nodePath).put({
+        ...currentData,
+        dataUpdates: (currentData.dataUpdates || 0) + 1,
+        lastUpdate: new Date().toISOString(),
+        message: \`Hello from Node ${nodeId} at \${new Date().toISOString()}\`
+      });
       
       // Every 3rd update, create a message that should propagate through the chain
       if ((currentData.dataUpdates || 0) % 3 === 0) {
@@ -140,7 +140,7 @@ function createPeerNode(nodeId, port, peerUrls, position) {
           hopCount: 0
         };
         
-        // bullet.get(\`messages/${nodeId}/\${messageId}\`).put(messageData);
+        bullet.get(\`messages/${nodeId}/\${messageId}\`).put(messageData);
         log(\`Created new propagation test message: \${JSON.stringify(messageData)}\`);
       }
       
