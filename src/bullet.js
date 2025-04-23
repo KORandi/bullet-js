@@ -1,7 +1,3 @@
-/**
- * Bullet.js - Core class for the distributed graph database
- */
-
 const BulletNetwork = require("./bullet-network");
 const BulletStorage = require("./bullet-storage");
 const BulletQuery = require("./bullet-query");
@@ -9,15 +5,11 @@ const BulletValidation = require("./bullet-validation");
 const BulletMiddleware = require("./bullet-middleware");
 const BulletSerializer = require("./bullet-serializer");
 
-// Conditionally require LevelDB storage to avoid dependency if not used
 let BulletLevelDBStorage = null;
 try {
-  // First, check if level package is available
   require.resolve("level");
-  // If that doesn't throw, load our LevelDB storage
   BulletLevelDBStorage = require("./bullet-leveldb-storage");
 } catch (err) {
-  // LevelDB dependency is optional
   console.log(
     "LevelDB dependency not available. LevelDB storage will be disabled."
   );
@@ -29,7 +21,7 @@ class Bullet {
       peers: [],
       server: true,
       storage: true,
-      storageType: "file", // "file" or "leveldb"
+      storageType: "file",
       storagePath: "./.bullet",
       leveldbPath: "./.bullet-leveldb",
       encrypt: false,
@@ -38,35 +30,28 @@ class Bullet {
       enableValidation: true,
       enableMiddleware: true,
       enableSerializer: true,
+      enableStorageLog: false,
       ...options,
     };
 
-    // Main data store - holds all graph nodes
     this.store = {};
 
-    // Subscription callbacks for data changes
     this.listeners = {};
 
-    // Transaction log for sync and conflict resolution
     this.log = [];
 
-    // Metadata for conflict resolution
     this.meta = {};
 
-    // Make BulletNode accessible for middleware
     this.BulletNode = BulletNode;
 
-    // Generate a unique ID for this instance
     this.id = this._generateId();
 
     console.log(`Bullet instance initialized with ID: ${this.id}`);
 
-    // Initialize middleware if enabled (must be first to hook other components)
     if (BulletMiddleware && this.options.enableMiddleware) {
       this.middleware = new BulletMiddleware(this);
     }
 
-    // Initialize storage if available and enabled
     if (this.options.storage) {
       if (this.options.storageType === "leveldb") {
         if (BulletLevelDBStorage) {
@@ -84,35 +69,32 @@ class Bullet {
               path: this.options.storagePath,
               encrypt: this.options.encrypt,
               encryptionKey: this.options.encryptionKey,
+              enableStorageLog: this.options.enableStorageLog,
             });
           }
         }
       } else if (BulletStorage) {
-        // Default to file storage
         this.storage = new BulletStorage(this, {
           path: this.options.storagePath,
           encrypt: this.options.encrypt,
           encryptionKey: this.options.encryptionKey,
+          enableStorageLog: this.options.enableStorageLog,
         });
       }
     }
 
-    // Initialize query and indexing if enabled
     if (BulletQuery && this.options.enableIndexing) {
       this.query = new BulletQuery(this);
     }
 
-    // Initialize validation if enabled
     if (BulletValidation && this.options.enableValidation) {
       this.validation = new BulletValidation(this);
     }
 
-    // Initialize serializer if enabled
     if (BulletSerializer && this.options.enableSerializer) {
       this.serializer = new BulletSerializer(this);
     }
 
-    // Initialize networking if available and enabled
     if (BulletNetwork && !this.options.disableNetwork) {
       this.network = new BulletNetwork(this, this.options);
     }
@@ -159,7 +141,6 @@ class Bullet {
     const parts = path.split("/").filter(Boolean);
     let current = this.store;
 
-    // Navigate to the parent node
     for (let i = 0; i < parts.length - 1; i++) {
       const part = parts[i];
       if (!current[part]) {
@@ -168,22 +149,18 @@ class Bullet {
       current = current[part];
     }
 
-    // Set the value
     const lastPart = parts[parts.length - 1];
     if (lastPart) {
-      // Check if this is a new value that needs to be synced
       const isNew = !this.meta[path] || timestamp > this.meta[path].timestamp;
 
       if (isNew) {
         current[lastPart] = data;
 
-        // Update metadata
         this.meta[path] = {
           timestamp,
           source: "local",
         };
 
-        // Log the transaction
         this.log.push({
           op: "set",
           path,
@@ -191,15 +168,12 @@ class Bullet {
           timestamp,
         });
 
-        // Limit log size
         if (this.log.length > 1000) {
           this.log = this.log.slice(-1000);
         }
 
-        // Notify subscribers
         this._notify(path, data);
 
-        // Broadcast to peers if networking is enabled
         if (broadcast && this.network) {
           this.network.broadcast(path, data, timestamp);
         }
@@ -213,7 +187,6 @@ class Bullet {
    * @param {*} data - New data
    */
   _notify(path, data) {
-    // Notify listeners for this specific path
     if (this.listeners[path]) {
       this.listeners[path].forEach((callback) => {
         try {
@@ -224,7 +197,6 @@ class Bullet {
       });
     }
 
-    // Notify parent path listeners
     const parts = path.split("/").filter(Boolean);
     while (parts.length > 0) {
       parts.pop();
@@ -245,9 +217,7 @@ class Bullet {
       }
     }
 
-    // Trigger manual save if storage is enabled
     if (this.storage) {
-      // Debounce save calls
       clearTimeout(this._saveTimeout);
       this._saveTimeout = setTimeout(() => {
         this.storage.save();
@@ -276,22 +246,18 @@ class Bullet {
    * @public
    */
   close() {
-    // Clear any pending save timeout
     if (this._saveTimeout) {
       clearTimeout(this._saveTimeout);
     }
 
-    // Close storage if available
     if (this.storage) {
       this.storage.close();
     }
 
-    // Close network if available
     if (this.network) {
       this.network.close();
     }
 
-    // Clear all listeners
     this.listeners = {};
 
     console.log(`Bullet instance ${this.id} closed`);
@@ -523,7 +489,6 @@ class Bullet {
     if (this.middleware) {
       this.middleware.on(event, listener);
     } else if (event === "change" || event === "value") {
-      // For compatibility with other DBs like Firebase
       console.warn("For change listeners, use node.on() instead");
     } else {
       console.warn(
@@ -709,7 +674,6 @@ class BulletNode {
 
     this.bullet.listeners[this.path].push(callback);
 
-    // Initial call with current data
     callback(this.value());
 
     return this;
@@ -733,13 +697,11 @@ class BulletNode {
   off(callback) {
     if (this.bullet.listeners[this.path]) {
       if (callback) {
-        // Remove specific callback
         const index = this.bullet.listeners[this.path].indexOf(callback);
         if (index >= 0) {
           this.bullet.listeners[this.path].splice(index, 1);
         }
       } else {
-        // Remove all callbacks
         this.bullet.listeners[this.path] = [];
       }
     }
@@ -751,7 +713,6 @@ class BulletNode {
    * @return {BulletNode} - This node for chaining
    */
   remove() {
-    // Set to null to mark as removed
     this.bullet._setData(this.path, null);
     return this;
   }

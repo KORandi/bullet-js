@@ -1,25 +1,17 @@
-/**
- * Bullet-Serializer.js - Serialization and external formats for Bullet.js
- */
-
 class BulletSerializer {
   constructor(bullet) {
     this.bullet = bullet;
 
-    // Serialization options
     this.options = {
       prettyPrint: false,
       includeMetadata: true,
       maxDepth: Infinity,
     };
 
-    // Custom serializers for specific types
     this.typeSerializers = new Map();
 
-    // Custom deserializers for specific types
     this.typeDeserializers = new Map();
 
-    // Register default serializers
     this._registerDefaultSerializers();
   }
 
@@ -28,14 +20,12 @@ class BulletSerializer {
    * @private
    */
   _registerDefaultSerializers() {
-    // Date serializer
     this.registerType(
       "Date",
       (value) => ({ __type: "Date", value: value.toISOString() }),
       (data) => new Date(data.value)
     );
 
-    // RegExp serializer
     this.registerType(
       "RegExp",
       (value) => {
@@ -46,21 +36,18 @@ class BulletSerializer {
       (data) => new RegExp(data.source, data.flags)
     );
 
-    // Set serializer
     this.registerType(
       "Set",
       (value) => ({ __type: "Set", value: Array.from(value) }),
       (data) => new Set(data.value)
     );
 
-    // Map serializer
     this.registerType(
       "Map",
       (value) => ({ __type: "Map", value: Array.from(value.entries()) }),
       (data) => new Map(data.value)
     );
 
-    // Buffer serializer (Node.js)
     if (typeof Buffer !== "undefined") {
       this.registerType(
         "Buffer",
@@ -69,7 +56,6 @@ class BulletSerializer {
       );
     }
 
-    // ArrayBuffer serializer
     this.registerType(
       "ArrayBuffer",
       (value) => {
@@ -129,13 +115,11 @@ class BulletSerializer {
       ...options,
     };
 
-    // Get data from the path
     const data = this.bullet._getData(path);
     const metadata = exportOptions.includeMetadata
       ? this._getMetadataForPath(path)
       : null;
 
-    // Create export object
     const exportObj = {
       data,
       metadata,
@@ -145,7 +129,6 @@ class BulletSerializer {
       version: "1.0",
     };
 
-    // Serialize to JSON
     const jsonStr = JSON.stringify(
       exportObj,
       this._replacer.bind(this, exportOptions),
@@ -170,25 +153,20 @@ class BulletSerializer {
     };
 
     try {
-      // Parse JSON
       const parsed = JSON.parse(json, this._reviver.bind(this));
 
-      // Validate format
       if (!parsed.format || parsed.format !== "bullet-json") {
         throw new Error("Invalid Bullet JSON format");
       }
 
-      // Determine target path
       const path = targetPath || parsed.path;
 
       if (!path) {
         throw new Error("No target path specified");
       }
 
-      // Import data
       this.bullet._setData(path, parsed.data);
 
-      // Import metadata if present and option enabled
       if (
         parsed.metadata &&
         importOptions.includeMetadata &&
@@ -226,17 +204,14 @@ class BulletSerializer {
 
     const data = this.bullet._getData(path);
 
-    // Ensure data is an object
     if (typeof data !== "object" || data === null) {
       throw new Error("Data must be an object to export as CSV");
     }
 
-    // Handle array data
     if (Array.isArray(data)) {
       return this._arrayToCSV(data, exportOptions);
     }
 
-    // Handle object data (convert to array)
     const rows = [];
     for (const key in data) {
       if (typeof data[key] === "object" && data[key] !== null) {
@@ -260,7 +235,6 @@ class BulletSerializer {
   _arrayToCSV(arr, options) {
     if (!arr.length) return "";
 
-    // Extract headers from all objects
     const headers = new Set();
     arr.forEach((obj) => {
       if (typeof obj === "object" && obj !== null) {
@@ -273,7 +247,6 @@ class BulletSerializer {
       return headerRow.map((header) => {
         if (obj[header] === undefined || obj[header] === null) return "";
 
-        // Escape and quote strings with delimiters
         if (typeof obj[header] === "string") {
           const escaped = obj[header].replace(/"/g, '""');
           if (
@@ -290,13 +263,11 @@ class BulletSerializer {
       });
     });
 
-    // Add header row if requested
     const csvRows = [];
     if (options.includeHeaders) {
       csvRows.push(headerRow.join(options.delimiter));
     }
 
-    // Add data rows
     csvRows.push(...rows.map((row) => row.join(options.delimiter)));
 
     return csvRows.join("\n");
@@ -318,7 +289,6 @@ class BulletSerializer {
     };
 
     try {
-      // Split into rows and handle line breaks inside quotes
       const rows = this._parseCSVRows(csv);
 
       if (!rows.length) {
@@ -332,7 +302,6 @@ class BulletSerializer {
         headers = this._parseCSVRow(rows[0], importOptions.delimiter);
         startRow = 1;
       } else {
-        // Generate numeric headers if no headers in file
         headers = Array.from(
           { length: rows[0].split(importOptions.delimiter).length },
           (_, i) => `field${i}`
@@ -341,26 +310,21 @@ class BulletSerializer {
 
       const result = {};
 
-      // Parse each row
       for (let i = startRow; i < rows.length; i++) {
         const row = this._parseCSVRow(rows[i], importOptions.delimiter);
 
-        // Skip empty rows
         if (row.length === 0 || (row.length === 1 && row[0] === "")) continue;
 
-        // Create object from row
         const obj = {};
         const id = row[0] || `row${i}`;
 
         for (let j = 0; j < Math.min(headers.length, row.length); j++) {
-          // Try to convert values to appropriate types
           obj[headers[j]] = this._convertCSVValue(row[j]);
         }
 
         result[id] = obj;
       }
 
-      // Save to database
       this.bullet._setData(targetPath, result);
 
       return {
@@ -393,24 +357,19 @@ class BulletSerializer {
 
       if (char === '"') {
         if (nextChar === '"') {
-          // Escaped quote
           currentRow += '"';
-          i++; // Skip next quote
+          i++;
         } else {
-          // Toggle quote mode
           inQuote = !inQuote;
         }
       } else if (char === "\n" && !inQuote) {
-        // End of row
         rows.push(currentRow);
         currentRow = "";
       } else {
-        // Regular character
         currentRow += char;
       }
     }
 
-    // Add final row if not empty
     if (currentRow.trim()) {
       rows.push(currentRow);
     }
@@ -436,24 +395,19 @@ class BulletSerializer {
 
       if (char === '"') {
         if (nextChar === '"') {
-          // Escaped quote
           currentField += '"';
-          i++; // Skip next quote
+          i++;
         } else {
-          // Toggle quote mode
           inQuote = !inQuote;
         }
       } else if (char === delimiter && !inQuote) {
-        // End of field
         fields.push(currentField);
         currentField = "";
       } else {
-        // Regular character
         currentField += char;
       }
     }
 
-    // Add final field
     fields.push(currentField);
 
     return fields;
@@ -466,14 +420,11 @@ class BulletSerializer {
    * @private
    */
   _convertCSVValue(value) {
-    // Empty value
     if (value === "") return null;
 
-    // Boolean
     if (value.toLowerCase() === "true") return true;
     if (value.toLowerCase() === "false") return false;
 
-    // Number
     if (!isNaN(value) && value.trim() !== "") {
       if (value.includes(".")) {
         return parseFloat(value);
@@ -481,7 +432,6 @@ class BulletSerializer {
       return parseInt(value, 10);
     }
 
-    // Date (ISO format)
     if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value)) {
       const date = new Date(value);
       if (!isNaN(date.getTime())) {
@@ -489,7 +439,6 @@ class BulletSerializer {
       }
     }
 
-    // Default: return as string
     return value;
   }
 
@@ -512,7 +461,6 @@ class BulletSerializer {
     let xml = `<?xml version="1.0" encoding="UTF-8"?>\n`;
     xml += `<${exportOptions.rootName} path="${path || ""}">\n`;
 
-    // Convert data to XML recursively
     xml += this._objectToXML(data, 1, exportOptions);
 
     xml += `</${exportOptions.rootName}>`;
@@ -555,7 +503,6 @@ class BulletSerializer {
       return xml;
     }
 
-    // Regular object
     for (const key in obj) {
       if (obj[key] === undefined || obj[key] === null) {
         xml += `${indent}<${this._escapeXML(key)} null="true"/>\n`;
@@ -598,7 +545,6 @@ class BulletSerializer {
    */
   importFromXML(xml, targetPath, options = {}) {
     try {
-      // Use DOMParser in browser or xml2js in Node.js
       let parsed;
 
       if (typeof DOMParser !== "undefined") {
@@ -611,7 +557,6 @@ class BulletSerializer {
         );
       }
 
-      // Save to database
       this.bullet._setData(targetPath, parsed);
 
       return {
@@ -634,12 +579,10 @@ class BulletSerializer {
    * @private
    */
   _xmlNodeToObject(node) {
-    // Handle null values
     if (node.getAttribute("null") === "true") {
       return null;
     }
 
-    // Handle simple types
     if (node.tagName === "value") {
       const type = node.getAttribute("type");
       const value = node.textContent;
@@ -654,7 +597,6 @@ class BulletSerializer {
       }
     }
 
-    // Handle arrays
     if (node.tagName === "array") {
       const result = [];
       for (const child of node.children) {
@@ -667,21 +609,17 @@ class BulletSerializer {
       return result;
     }
 
-    // Handle objects
     const result = {};
     for (const child of node.children) {
       const key = child.tagName;
 
-      // Skip bullet root node
       if (key === "bullet") continue;
 
-      // Get type
       const type = child.getAttribute("type");
 
       if (child.getAttribute("null") === "true") {
         result[key] = null;
       } else if (type) {
-        // Handle typed values
         switch (type) {
           case "number":
             result[key] = Number(child.textContent);
@@ -693,10 +631,8 @@ class BulletSerializer {
             result[key] = child.textContent;
         }
       } else if (child.children.length) {
-        // Handle nested objects/arrays
         result[key] = this._xmlNodeToObject(child);
       } else {
-        // Empty element
         result[key] = child.textContent || null;
       }
     }
@@ -713,12 +649,10 @@ class BulletSerializer {
   _getMetadataForPath(path) {
     const metadata = {};
 
-    // Add path metadata
     if (this.bullet.meta) {
       metadata.meta = this.bullet.meta[path] || {};
     }
 
-    // Add query indices metadata if enabled
     if (this.bullet.query && this.bullet.query.indices) {
       const indices = {};
 
@@ -745,12 +679,10 @@ class BulletSerializer {
    * @private
    */
   _importMetadata(path, metadata) {
-    // Import path metadata
     if (metadata.meta && this.bullet.meta) {
       this.bullet.meta[path] = metadata.meta;
     }
 
-    // Import indices if present
     if (metadata.indices && this.bullet.query) {
       for (const indexKey of Object.keys(metadata.indices)) {
         const [basePath, field] = indexKey.split(":");
@@ -772,10 +704,8 @@ class BulletSerializer {
    * @private
    */
   _replacer(options, key, value) {
-    // Track depth to prevent circular references
     if (!this._depth) this._depth = 0;
 
-    // Check depth limit
     if (typeof value === "object" && value !== null) {
       this._depth++;
 
@@ -785,11 +715,9 @@ class BulletSerializer {
       }
     }
 
-    // Handle special types
     if (value !== null && typeof value === "object") {
       const constructorName = value.constructor.name;
 
-      // Check for registered serializer
       if (this.typeSerializers.has(constructorName)) {
         const result = this.typeSerializers.get(constructorName)(value);
         this._depth--;
@@ -797,7 +725,6 @@ class BulletSerializer {
       }
     }
 
-    // Let JSON.stringify handle the default case
     if (typeof value === "object" && value !== null) {
       this._depth--;
     }
@@ -813,9 +740,7 @@ class BulletSerializer {
    * @private
    */
   _reviver(key, value) {
-    // Check for type objects
     if (value !== null && typeof value === "object" && value.__type) {
-      // Look for registered deserializer
       if (this.typeDeserializers.has(value.__type)) {
         return this.typeDeserializers.get(value.__type)(value);
       }

@@ -1,18 +1,11 @@
-/**
- * Bullet-Validation.js - Data validation and schema enforcement for Bullet.js
- */
-
 class BulletValidation {
   constructor(bullet) {
     this.bullet = bullet;
 
-    // Store for schemas
     this.schemas = {};
 
-    // Map of paths to schema names
     this.pathSchemas = {};
 
-    // Error handlers
     this.errorHandlers = {
       validation: [],
       type: [],
@@ -22,7 +15,6 @@ class BulletValidation {
       all: [],
     };
 
-    // Initialize validation hooks
     this._initValidation();
   }
 
@@ -31,10 +23,8 @@ class BulletValidation {
    * @private
    */
   _initValidation() {
-    // Save original _setData method
     const originalSetData = this.bullet._setData.bind(this.bullet);
 
-    // Override _setData to validate data before writing
     this.bullet._setData = (
       path,
       data,
@@ -42,21 +32,16 @@ class BulletValidation {
       broadcast = true
     ) => {
       try {
-        // Check if path has a schema
         const isValid = this._validateDataForPath(path, data);
 
         if (isValid) {
-          // Call original method if valid
           originalSetData(path, data, timestamp, broadcast);
         } else {
-          // Data is invalid, don't save
           console.error(`Validation failed for path: ${path}`);
         }
       } catch (error) {
-        // Handle validation errors
         this._handleError(error);
 
-        // Decide whether to proceed based on error severity
         if (!error.isFatal) {
           originalSetData(path, data, timestamp, broadcast);
         }
@@ -72,12 +57,10 @@ class BulletValidation {
    * @public
    */
   defineSchema(name, schema) {
-    // Validate schema definition itself
     if (!schema || typeof schema !== "object") {
       throw new Error("Schema must be an object");
     }
 
-    // Store the schema
     this.schemas[name] = this._normalizeSchema(schema);
 
     console.log(`Schema '${name}' defined`);
@@ -99,10 +82,8 @@ class BulletValidation {
       validators: schema.validators || [],
     };
 
-    // Process property definitions
     if (schema.properties && typeof schema.properties === "object") {
       for (const [propName, propSchema] of Object.entries(schema.properties)) {
-        // Recursively normalize nested schemas
         if (propSchema.type === "object" && propSchema.properties) {
           normalized.properties[propName] = this._normalizeSchema(propSchema);
         } else {
@@ -181,16 +162,13 @@ class BulletValidation {
    * @private
    */
   _validateDataForPath(path, data) {
-    // Find applicable schema for this path
     let schemaPath = null;
     let schemaName = null;
 
-    // Check direct path match
     if (this.pathSchemas[path]) {
       schemaPath = path;
       schemaName = this.pathSchemas[path];
     } else {
-      // Check parent paths
       const parts = path.split("/").filter(Boolean);
 
       while (parts.length > 0) {
@@ -206,7 +184,6 @@ class BulletValidation {
       }
     }
 
-    // No schema found for this path
     if (!schemaPath || !schemaName) {
       return true;
     }
@@ -219,18 +196,15 @@ class BulletValidation {
     }
 
     try {
-      // If this is a child path of the schema path, validate just this property
       if (path !== schemaPath) {
         const relativePath = path.slice(schemaPath.length + 1);
         const propertyPath = relativePath.split("/").filter(Boolean);
 
-        // Handle nested property validation
         if (propertyPath.length > 0) {
           return this._validateNestedProperty(schema, propertyPath, data);
         }
       }
 
-      // Otherwise validate entire object
       return this._validateAgainstSchema(schema, data, schemaName);
     } catch (error) {
       this._handleError(error);
@@ -249,11 +223,9 @@ class BulletValidation {
   _validateNestedProperty(schema, propertyPath, data) {
     const [prop, ...rest] = propertyPath;
 
-    // Find property schema
     const propSchema = schema.properties[prop];
 
     if (!propSchema) {
-      // If additionalProperties is false, this is an error
       if (schema.additionalProperties === false) {
         throw this._createError(
           "validation",
@@ -262,11 +234,9 @@ class BulletValidation {
         );
       }
 
-      // Otherwise, it's allowed
       return true;
     }
 
-    // If this is a nested path, recurse
     if (rest.length > 0) {
       if (propSchema.type !== "object") {
         throw this._createError(
@@ -279,7 +249,6 @@ class BulletValidation {
       return this._validateNestedProperty(propSchema, rest, data);
     }
 
-    // Validate the value against the property schema
     return this._validateValue(propSchema, data, prop);
   }
 
@@ -293,7 +262,6 @@ class BulletValidation {
    * @private
    */
   _validateAgainstSchema(schema, data, schemaName) {
-    // Type validation
     if (schema.type && !this._checkType(data, schema.type)) {
       throw this._createError(
         "type",
@@ -302,12 +270,10 @@ class BulletValidation {
       );
     }
 
-    // If not an object, no further validation needed
     if (typeof data !== "object" || data === null) {
       return true;
     }
 
-    // Required properties
     for (const required of schema.required) {
       if (!(required in data)) {
         throw this._createError(
@@ -318,9 +284,7 @@ class BulletValidation {
       }
     }
 
-    // Validate each property
     for (const [propName, propValue] of Object.entries(data)) {
-      // Check if property is defined in schema
       if (propName in schema.properties) {
         const propSchema = schema.properties[propName];
 
@@ -328,7 +292,6 @@ class BulletValidation {
           return false;
         }
       } else if (schema.additionalProperties === false) {
-        // Additional properties not allowed
         throw this._createError(
           "validation",
           `Unknown property: ${propName}`,
@@ -337,7 +300,6 @@ class BulletValidation {
       }
     }
 
-    // Run custom validators for the entire object
     for (const validator of schema.validators) {
       try {
         const isValid = validator(data);
@@ -351,7 +313,6 @@ class BulletValidation {
         }
       } catch (error) {
         if (!error.isValidationError) {
-          // Wrap normal errors in a validation error
           throw this._createError(
             "custom",
             `Custom validator error: ${error.message}`,
@@ -375,12 +336,10 @@ class BulletValidation {
    * @private
    */
   _validateValue(propSchema, value, propName) {
-    // If value is undefined but property has a default, it's valid
     if (value === undefined && "default" in propSchema) {
       return true;
     }
 
-    // Required check
     if (propSchema.required && (value === undefined || value === null)) {
       throw this._createError(
         "required",
@@ -389,12 +348,10 @@ class BulletValidation {
       );
     }
 
-    // If value is undefined or null, no further validation needed
     if (value === undefined || value === null) {
       return true;
     }
 
-    // Type validation
     if (propSchema.type && !this._checkType(value, propSchema.type)) {
       throw this._createError(
         "type",
@@ -403,7 +360,6 @@ class BulletValidation {
       );
     }
 
-    // Enum validation
     if (propSchema.enum && Array.isArray(propSchema.enum)) {
       if (!propSchema.enum.includes(value)) {
         throw this._createError(
@@ -414,7 +370,6 @@ class BulletValidation {
       }
     }
 
-    // Min/max validation for numbers
     if (propSchema.type === "number" || propSchema.type === "integer") {
       if (typeof propSchema.min === "number" && value < propSchema.min) {
         throw this._createError(
@@ -433,7 +388,6 @@ class BulletValidation {
       }
     }
 
-    // Pattern validation for strings
     if (propSchema.type === "string" && propSchema.pattern) {
       if (!propSchema.pattern.test(value)) {
         throw this._createError(
@@ -444,7 +398,6 @@ class BulletValidation {
       }
     }
 
-    // Format validation for strings
     if (propSchema.type === "string" && propSchema.format) {
       if (!this._checkFormat(value, propSchema.format)) {
         throw this._createError(
@@ -455,7 +408,6 @@ class BulletValidation {
       }
     }
 
-    // Min/max length for strings and arrays
     if (
       (propSchema.type === "string" || propSchema.type === "array") &&
       typeof propSchema.min === "number" &&
@@ -480,7 +432,6 @@ class BulletValidation {
       );
     }
 
-    // For objects, recursively validate
     if (
       propSchema.type === "object" &&
       typeof value === "object" &&
@@ -489,7 +440,6 @@ class BulletValidation {
       return this._validateAgainstSchema(propSchema, value, propName);
     }
 
-    // Custom validators
     for (const validator of propSchema.validators) {
       try {
         const isValid = validator(value);
@@ -503,7 +453,6 @@ class BulletValidation {
         }
       } catch (error) {
         if (!error.isValidationError) {
-          // Wrap normal errors in a validation error
           throw this._createError(
             "custom",
             `Custom validator error for ${propName}: ${error.message}`,
@@ -619,7 +568,6 @@ class BulletValidation {
       return;
     }
 
-    // Call type-specific handlers
     if (error.type && this.errorHandlers[error.type]) {
       this.errorHandlers[error.type].forEach((handler) => {
         try {
@@ -630,7 +578,6 @@ class BulletValidation {
       });
     }
 
-    // Call global handlers
     this.errorHandlers["all"].forEach((handler) => {
       try {
         handler(error);

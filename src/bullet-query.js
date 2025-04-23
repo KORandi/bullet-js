@@ -1,18 +1,11 @@
-/**
- * Bullet-Query.js - Query and indexing capabilities for Bullet.js
- */
-
 class BulletQuery {
   constructor(bullet) {
     this.bullet = bullet;
 
-    // Index store - maintains various indices for faster queries
     this.indices = {};
 
-    // Set of indexed paths
     this.indexedPaths = new Set();
 
-    // Initialize indexing hooks
     this._initIndexing();
   }
 
@@ -21,20 +14,16 @@ class BulletQuery {
    * @private
    */
   _initIndexing() {
-    // Save original _setData method
     const originalSetData = this.bullet._setData.bind(this.bullet);
 
-    // Override _setData to update indices on data changes
     this.bullet._setData = (
       path,
       data,
       timestamp = Date.now(),
       broadcast = true
     ) => {
-      // Call original method
       originalSetData(path, data, timestamp, broadcast);
 
-      // Update indices if the path is indexed
       this._updateIndices(path, data);
     };
   }
@@ -49,18 +38,15 @@ class BulletQuery {
   index(path, field = null) {
     const indexKey = field ? `${path}:${field}` : path;
 
-    // Check if already indexed
     if (this.indices[indexKey]) {
       return this;
     }
 
     console.log(`Creating index on ${indexKey}`);
 
-    // Create the index
     this.indices[indexKey] = new Map();
     this.indexedPaths.add(path);
 
-    // Build initial index
     this._buildIndex(path, field);
 
     return this;
@@ -76,12 +62,10 @@ class BulletQuery {
     const indexKey = field ? `${path}:${field}` : path;
     const index = this.indices[indexKey];
 
-    // Get all data at the path
     const baseData = this.bullet._getData(path);
 
     if (typeof baseData === "object" && baseData !== null) {
       if (field) {
-        // Index specific field in child objects
         for (const [key, value] of Object.entries(baseData)) {
           if (typeof value === "object" && value !== null && field in value) {
             const fieldValue = value[field];
@@ -89,7 +73,6 @@ class BulletQuery {
           }
         }
       } else {
-        // Index the leaf values directly
         for (const [key, value] of Object.entries(baseData)) {
           this._addToIndex(index, value, `${path}/${key}`);
         }
@@ -105,16 +88,12 @@ class BulletQuery {
    * @private
    */
   _addToIndex(index, value, nodePath) {
-    // Handle different value types
     if (value === null || value === undefined) {
-      // Skip null values
       return;
     }
 
-    // Convert value to string for indexing
     const indexValue = this._getIndexableValue(value);
 
-    // Add to index
     if (!index.has(indexValue)) {
       index.set(indexValue, new Set());
     }
@@ -134,14 +113,12 @@ class BulletQuery {
       return;
     }
 
-    // Convert value to string for indexing
     const indexValue = this._getIndexableValue(value);
 
     if (index.has(indexValue)) {
       const paths = index.get(indexValue);
       paths.delete(nodePath);
 
-      // Clean up empty sets
       if (paths.size === 0) {
         index.delete(indexValue);
       }
@@ -168,25 +145,20 @@ class BulletQuery {
    * @private
    */
   _updateIndices(path, newData) {
-    // Find relevant indices for this path
     for (const indexedPath of this.indexedPaths) {
       if (path.startsWith(indexedPath + "/")) {
         const relativePath = path.slice(indexedPath.length + 1);
         const parts = relativePath.split("/");
 
-        // Handle different index types
         for (const [indexKey, index] of Object.entries(this.indices)) {
           const [basePath, field] = indexKey.split(":");
 
           if (basePath !== indexedPath) continue;
 
           if (field && parts.length === 1) {
-            // This is a field-specific index and we changed a direct child
-            // We need to update the index for this path
             const oldData = this.bullet._getData(`${indexedPath}/${parts[0]}`);
 
             if (oldData && oldData[field]) {
-              // Remove old value from index
               this._removeFromIndex(
                 index,
                 oldData[field],
@@ -195,7 +167,6 @@ class BulletQuery {
             }
 
             if (newData && newData[field]) {
-              // Add new value to index
               this._addToIndex(
                 index,
                 newData[field],
@@ -203,8 +174,6 @@ class BulletQuery {
               );
             }
           } else if (!field && parts.length === 1) {
-            // This is a direct child index
-            // Remove old value and add new one
             const oldData = this.bullet._getData(path);
             this._removeFromIndex(index, oldData, path);
             this._addToIndex(index, newData, path);
@@ -223,7 +192,6 @@ class BulletQuery {
    * @public
    */
   equals(path, field, value) {
-    // Handle case where field is actually the value (for leaf nodes)
     if (arguments.length === 2) {
       value = field;
       field = null;
@@ -231,7 +199,6 @@ class BulletQuery {
 
     const indexKey = field ? `${path}:${field}` : path;
 
-    // Create index if it doesn't exist
     if (!this.indices[indexKey]) {
       this.index(path, field);
     }
@@ -240,7 +207,6 @@ class BulletQuery {
     const indexValue = this._getIndexableValue(value);
     const results = [];
 
-    // Find all matching nodes
     if (index.has(indexValue)) {
       const paths = index.get(indexValue);
       for (const nodePath of paths) {
@@ -261,7 +227,6 @@ class BulletQuery {
    * @public
    */
   range(path, field, min, max) {
-    // Handle case where field is actually min (for leaf nodes)
     if (arguments.length === 3) {
       max = min;
       min = field;
@@ -270,7 +235,6 @@ class BulletQuery {
 
     const indexKey = field ? `${path}:${field}` : path;
 
-    // Create index if it doesn't exist
     if (!this.indices[indexKey]) {
       this.index(path, field);
     }
@@ -278,23 +242,17 @@ class BulletQuery {
     const index = this.indices[indexKey];
     const results = [];
 
-    // Find all values in range
     for (const [indexValue, paths] of index.entries()) {
-      // Convert to appropriate type for comparison
       let value;
       try {
-        // Try to parse as number first
         value = Number(indexValue);
         if (isNaN(value)) {
-          // If not a number, use string comparison
           value = indexValue;
         }
       } catch (e) {
-        // Fallback to string
         value = indexValue;
       }
 
-      // Compare in appropriate range
       if (
         typeof min !== "undefined" &&
         value >= min &&
@@ -341,7 +299,6 @@ class BulletQuery {
    * @public
    */
   count(path, field, value) {
-    // Handle case where field is actually the value (for leaf nodes)
     if (arguments.length === 2) {
       value = field;
       field = null;
@@ -349,7 +306,6 @@ class BulletQuery {
 
     const indexKey = field ? `${path}:${field}` : path;
 
-    // Create index if it doesn't exist
     if (!this.indices[indexKey]) {
       this.index(path, field);
     }
@@ -357,7 +313,6 @@ class BulletQuery {
     const index = this.indices[indexKey];
     const indexValue = this._getIndexableValue(value);
 
-    // Return count of matching nodes
     if (index.has(indexValue)) {
       return index.get(indexValue).size;
     }

@@ -1,8 +1,3 @@
-/**
- * bullet-storage-log.js - Persistent storage log for Bullet.js
- * A component that provides append-only persistent logging for the Bullet database
- */
-
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
@@ -16,30 +11,27 @@ class BulletStorageLog extends EventEmitter {
     this.options = {
       path: options.path || "./.bullet/logs",
       prefix: "transaction-log",
-      maxFileSize: 50 * 1024 * 1024, // 50 MB max file size before rotation
-      rotationCount: 5, // Keep 5 rotated files by default
-      memoryCache: 1000, // How many recent entries to keep in memory
+      maxFileSize: 50 * 1024 * 1024,
+      rotationCount: 5,
+      memoryCache: 1000,
       encrypt: options.encrypt || false,
       encryptionKey: options.encryptionKey || null,
-      syncInterval: 500, // ms between syncs to disk
+      syncInterval: 500,
       ...options,
     };
 
-    // Ensure log directory exists
     if (!fs.existsSync(this.options.path)) {
       fs.mkdirSync(this.options.path, { recursive: true });
     }
 
-    // Internal state
     this.currentLogFile = null;
     this.currentFileSize = 0;
     this.currentFileNumber = 0;
     this.writeStream = null;
-    this.recentEntries = []; // In-memory cache of recent entries
+    this.recentEntries = [];
     this.syncTimer = null;
     this.pendingWrites = [];
 
-    // Initialize the log
     this._init();
   }
 
@@ -48,16 +40,12 @@ class BulletStorageLog extends EventEmitter {
    * @private
    */
   _init() {
-    // Find the latest log file
     this._findLatestLogFile();
 
-    // Open the log file for writing
     this._openLogFile();
 
-    // Start sync timer
     this._startSyncTimer();
 
-    // Load recent entries into memory
     this._loadRecentEntries();
   }
 
@@ -75,7 +63,6 @@ class BulletStorageLog extends EventEmitter {
       if (logFiles.length === 0) {
         this.currentFileNumber = 1;
       } else {
-        // Extract file numbers and find the highest
         const fileNumbers = logFiles.map((file) => {
           const match = file.match(/^transaction-log-(\d+)\.log$/);
           return match ? parseInt(match[1], 10) : 0;
@@ -83,13 +70,11 @@ class BulletStorageLog extends EventEmitter {
 
         this.currentFileNumber = Math.max(...fileNumbers);
 
-        // Check if the current file is too large
         const currentFilePath = this._getLogFilePath(this.currentFileNumber);
         const stats = fs.statSync(currentFilePath);
         this.currentFileSize = stats.size;
 
         if (this.currentFileSize >= this.options.maxFileSize) {
-          // Rotate to a new file
           this.currentFileNumber++;
           this.currentFileSize = 0;
         }
@@ -123,12 +108,10 @@ class BulletStorageLog extends EventEmitter {
    */
   _openLogFile() {
     try {
-      // Close existing stream if any
       if (this.writeStream) {
         this.writeStream.end();
       }
 
-      // Create new write stream in append mode
       this.writeStream = fs.createWriteStream(this.currentLogFile, {
         flags: "a",
         encoding: "utf8",
@@ -163,7 +146,6 @@ class BulletStorageLog extends EventEmitter {
     let entriesNeeded = this.options.memoryCache;
     let fileNumber = this.currentFileNumber;
 
-    // First try to read from the current file
     while (entriesNeeded > 0 && fileNumber > 0) {
       const filePath = this._getLogFilePath(fileNumber);
 
@@ -174,7 +156,6 @@ class BulletStorageLog extends EventEmitter {
             .split("\n")
             .filter((line) => line.trim() !== "");
 
-          // Parse entries from newest to oldest
           for (let i = lines.length - 1; i >= 0 && entriesNeeded > 0; i--) {
             try {
               const decrypted = this._decrypt(lines[i]);
@@ -217,19 +198,16 @@ class BulletStorageLog extends EventEmitter {
         id: this._generateId(),
       };
 
-      // Add to pending writes
       this.pendingWrites.push({
         entry,
         resolve,
         reject,
       });
 
-      // If there are too many pending writes, flush immediately
       if (this.pendingWrites.length >= 100) {
         this._flushPendingWrites();
       }
 
-      // Add to recent entries in memory
       this.recentEntries.push(entry);
       if (this.recentEntries.length > this.options.memoryCache) {
         this.recentEntries.shift();
@@ -248,24 +226,21 @@ class BulletStorageLog extends EventEmitter {
     this.pendingWrites = [];
 
     try {
-      // Check if we need to rotate log file
       let totalSize = 0;
       for (const write of writes) {
         const serialized = JSON.stringify(write.entry);
         const encrypted = this._encrypt(serialized);
-        totalSize += encrypted.length + 1; // +1 for newline
+        totalSize += encrypted.length + 1;
       }
 
       if (this.currentFileSize + totalSize >= this.options.maxFileSize) {
         this._rotateLogFile();
       }
 
-      // Write all entries to the log file
       for (const write of writes) {
         const serialized = JSON.stringify(write.entry);
         const encrypted = this._encrypt(serialized);
 
-        // Write to file
         this.writeStream.write(encrypted + "\n", "utf8", (err) => {
           if (err) {
             console.error("Error writing to log:", err);
@@ -275,16 +250,13 @@ class BulletStorageLog extends EventEmitter {
           }
         });
 
-        // Update file size
         this.currentFileSize += encrypted.length + 1;
 
-        // Emit append event
         this.emit("append", write.entry);
       }
     } catch (err) {
       console.error("Error flushing writes:", err);
 
-      // Reject all pending writes
       for (const write of writes) {
         write.reject(err);
       }
@@ -296,20 +268,16 @@ class BulletStorageLog extends EventEmitter {
    * @private
    */
   _rotateLogFile() {
-    // Close current file
     if (this.writeStream) {
       this.writeStream.end();
     }
 
-    // Increment file number
     this.currentFileNumber++;
     this.currentFileSize = 0;
     this.currentLogFile = this._getLogFilePath(this.currentFileNumber);
 
-    // Open new file
     this._openLogFile();
 
-    // Clean up old files if needed
     this._cleanupOldFiles();
 
     console.log(
@@ -385,7 +353,6 @@ class BulletStorageLog extends EventEmitter {
         resolve();
       });
 
-      // If there's nothing to drain, resolve immediately
       if (this.writeStream.writableLength === 0) {
         resolve();
       }
@@ -400,16 +367,13 @@ class BulletStorageLog extends EventEmitter {
   close() {
     return new Promise(async (resolve, reject) => {
       try {
-        // Clear sync timer
         if (this.syncTimer) {
           clearInterval(this.syncTimer);
           this.syncTimer = null;
         }
 
-        // Flush any pending writes
         await this.flush();
 
-        // Close write stream
         if (this.writeStream) {
           this.writeStream.end(() => {
             this.writeStream = null;
@@ -456,7 +420,6 @@ class BulletStorageLog extends EventEmitter {
       let encrypted = cipher.update(data, "utf8", "hex");
       encrypted += cipher.final("hex");
 
-      // Prepend IV to the encrypted data
       return iv.toString("hex") + encrypted;
     } catch (err) {
       console.error("Encryption failed:", err);
@@ -478,7 +441,6 @@ class BulletStorageLog extends EventEmitter {
     try {
       const key = this._getEncryptionKey();
 
-      // IV is the first 16 bytes (32 hex characters)
       const iv = Buffer.from(data.slice(0, 32), "hex");
       const encrypted = data.slice(32);
 
@@ -504,7 +466,6 @@ class BulletStorageLog extends EventEmitter {
       throw new Error("Encryption key is required when encryption is enabled");
     }
 
-    // If it's already a Buffer of the right length, use it directly
     if (
       Buffer.isBuffer(this.options.encryptionKey) &&
       this.options.encryptionKey.length === 32
@@ -512,7 +473,6 @@ class BulletStorageLog extends EventEmitter {
       return this.options.encryptionKey;
     }
 
-    // Otherwise, derive a key using SHA-256
     return crypto
       .createHash("sha256")
       .update(String(this.options.encryptionKey))
@@ -535,7 +495,6 @@ class BulletStorageLogIterator {
       ...options,
     };
 
-    // State
     this.currentFile = this.options.reverse
       ? this.options.endFile
       : this.options.startFile;
@@ -563,11 +522,9 @@ class BulletStorageLogIterator {
       return [];
     }
 
-    // If we need to load a file
     if (!this.fileLines) {
       await this._loadFile();
 
-      // If we couldn't load any lines, we're done
       if (!this.fileLines || this.fileLines.length === 0) {
         this.exhausted = true;
         return [];
@@ -577,19 +534,15 @@ class BulletStorageLogIterator {
     const batch = [];
     const reverse = this.options.reverse;
 
-    // Read a batch
     while (batch.length < this.options.batchSize) {
       const index = reverse
         ? this.fileLines.length - 1 - this.position
         : this.position;
 
-      // Check if we've reached the end of this file
       if (index < 0 || index >= this.fileLines.length) {
-        // Move to the next file
         this.position = 0;
         this.fileLines = null;
 
-        // Advance or go back to the next file
         if (reverse) {
           this.currentFile--;
           if (this.currentFile < this.options.startFile) {
@@ -604,7 +557,6 @@ class BulletStorageLogIterator {
           }
         }
 
-        // Try to load the next file
         await this._loadFile();
         if (!this.fileLines || this.fileLines.length === 0) {
           this.exhausted = true;
@@ -613,19 +565,15 @@ class BulletStorageLogIterator {
         continue;
       }
 
-      // Get the next line
       const line = this.fileLines[index];
       this.position++;
 
-      // Skip empty lines
       if (!line || line.trim() === "") continue;
 
       try {
-        // Decrypt and parse the entry
         const decrypted = this.log._decrypt(line);
         const entry = JSON.parse(decrypted);
 
-        // Apply filter if provided
         if (!this.options.filter || this.options.filter(entry)) {
           batch.push(entry);
         }

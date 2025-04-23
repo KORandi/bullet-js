@@ -1,9 +1,3 @@
-/**
- * Example integration of BulletStorageLog with bullet-storage.js
- */
-
-// Modified version of bullet-storage.js that uses the persistent log
-
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
@@ -14,32 +8,31 @@ class BulletStorage {
     this.bullet = bullet;
     this.options = {
       path: "./.bullet",
-      saveInterval: 5000, // 5 seconds
+      saveInterval: 5000,
       encrypt: false,
       encryptionKey: null,
+      enableStorageLog: false,
       ...options,
     };
 
-    // Create storage directory if it doesn't exist
     if (!fs.existsSync(this.options.path)) {
       fs.mkdirSync(this.options.path, { recursive: true });
     }
 
-    // Track persisted state to optimize saves
     this.persisted = {
       store: {},
       meta: {},
       log: [],
     };
 
-    // Initialize the persistent log - keep separate from the in-memory log
-    this.historyLog = new BulletStorageLog(bullet, {
-      path: path.join(this.options.path, "logs"),
-      encrypt: this.options.encrypt,
-      encryptionKey: this.options.encryptionKey,
-    });
+    if (this.options.enableStorageLog) {
+      this.historyLog = new BulletStorageLog(bullet, {
+        path: path.join(this.options.path, "logs"),
+        encrypt: this.options.encrypt,
+        encryptionKey: this.options.encryptionKey,
+      });
+    }
 
-    // Initialize persistence
     this._initPersistence();
   }
 
@@ -48,10 +41,8 @@ class BulletStorage {
    * @private
    */
   _initPersistence() {
-    // Load existing data if available
     this._loadData();
 
-    // Hook into bullet's _setData to also log to historyLog without changing the original behavior
     const originalSetData = this.bullet._setData.bind(this.bullet);
 
     this.bullet._setData = (
@@ -60,39 +51,40 @@ class BulletStorage {
       timestamp = Date.now(),
       broadcast = true
     ) => {
-      // Call original method which handles the in-memory log
       originalSetData(path, data, timestamp, broadcast);
 
-      // Also log the operation to persistent historyLog (don't await to avoid blocking)
-      this.historyLog.append(path, data, timestamp).catch((err) => {
-        console.error("Error appending to history log:", err);
-      });
+      if (this.options.enableStorageLog) {
+        this.historyLog.append(path, data, timestamp).catch((err) => {
+          console.error("Error appending to history log:", err);
+        });
+      }
     };
 
-    // Start periodic save
     this.saveInterval = setInterval(() => {
       this._saveData();
     }, this.options.saveInterval);
 
-    // Setup save on exit
     process.on("exit", () => {
       this._saveData();
-      this.historyLog.close(); // Close the historyLog
+      if (this.options.enableStorageLog) {
+        this.historyLog.close();
+      }
     });
 
-    // Handle other exit signals
     ["SIGINT", "SIGTERM", "SIGQUIT"].forEach((signal) => {
       process.on(signal, () => {
         this._saveData();
-        this.historyLog
-          .close() // Close the historyLog
-          .then(() => {
-            process.exit();
-          })
-          .catch((err) => {
-            console.error("Error closing history log:", err);
-            process.exit(1);
-          });
+        if (this.options.enableStorageLog) {
+          this.historyLog
+            .close()
+            .then(() => {
+              process.exit();
+            })
+            .catch((err) => {
+              console.error("Error closing history log:", err);
+              process.exit(1);
+            });
+        }
       });
     });
   }
@@ -103,48 +95,35 @@ class BulletStorage {
    */
   _loadData() {
     try {
-      // Load main store
       const storePath = path.join(this.options.path, "store.json");
       if (fs.existsSync(storePath)) {
         const storeData = fs.readFileSync(storePath);
         const storeJson = this._decrypt(storeData);
 
-        // Merge with existing store
         this._deepMerge(this.bullet.store, JSON.parse(storeJson));
-
-        // Update persisted state
         this.persisted.store = JSON.parse(JSON.stringify(this.bullet.store));
       }
 
-      // Load metadata
       const metaPath = path.join(this.options.path, "meta.json");
       if (fs.existsSync(metaPath)) {
         const metaData = fs.readFileSync(metaPath);
         const metaJson = this._decrypt(metaData);
 
-        // Merge with existing metadata
         Object.assign(this.bullet.meta, JSON.parse(metaJson));
-
-        // Update persisted state
         this.persisted.meta = JSON.parse(JSON.stringify(this.bullet.meta));
       }
 
-      // Load transaction log
       const logPath = path.join(this.options.path, "log.json");
       if (fs.existsSync(logPath)) {
         const logData = fs.readFileSync(logPath);
         const logJson = this._decrypt(logData);
 
-        // Merge with existing log
         this.bullet.log = [...this.bullet.log, ...JSON.parse(logJson)];
 
-        // Trim log if too large - THIS STILL HAPPENS FOR IN-MEMORY LOG
-        // But the historyLog will retain all entries
         if (this.bullet.log.length > 1000) {
           this.bullet.log = this.bullet.log.slice(-1000);
         }
 
-        // Update persisted state
         this.persisted.log = [...this.bullet.log];
       }
 
@@ -160,32 +139,28 @@ class BulletStorage {
    */
   _saveData() {
     try {
-      // Check if anything has changed
       if (this._hasChanges()) {
-        // Save main store
         const storeJson = JSON.stringify(this.bullet.store);
         const storeData = this._encrypt(storeJson);
         fs.writeFileSync(path.join(this.options.path, "store.json"), storeData);
 
-        // Save metadata
         const metaJson = JSON.stringify(this.bullet.meta);
         const metaData = this._encrypt(metaJson);
         fs.writeFileSync(path.join(this.options.path, "meta.json"), metaData);
 
-        // Save transaction log - still maintain the in-memory log compatibility
         const logJson = JSON.stringify(this.bullet.log);
         const logData = this._encrypt(logJson);
         fs.writeFileSync(path.join(this.options.path, "log.json"), logData);
 
-        // Update persisted state
         this.persisted.store = JSON.parse(JSON.stringify(this.bullet.store));
         this.persisted.meta = JSON.parse(JSON.stringify(this.bullet.meta));
         this.persisted.log = [...this.bullet.log];
 
-        // Ensure historyLog is flushed
-        this.historyLog.flush().catch((err) => {
-          console.error("Error flushing history log:", err);
-        });
+        if (this.options.enableStorageLog) {
+          this.historyLog.flush().catch((err) => {
+            console.error("Error flushing history log:", err);
+          });
+        }
 
         console.log("Bullet: Data persisted to storage");
       }
@@ -200,12 +175,10 @@ class BulletStorage {
    * @private
    */
   _hasChanges() {
-    // Compare log lengths as a quick check
     if (this.bullet.log.length !== this.persisted.log.length) {
       return true;
     }
 
-    // Check for different timestamps in meta
     for (const path in this.bullet.meta) {
       if (
         !this.persisted.meta[path] ||
@@ -215,8 +188,6 @@ class BulletStorage {
       }
     }
 
-    // Deep comparison is expensive, so we rely on metadata changes
-    // as a proxy for data changes
     return false;
   }
 
@@ -233,7 +204,6 @@ class BulletStorage {
         typeof source[key] === "object" &&
         !Array.isArray(source[key])
       ) {
-        // Create the property if it doesn't exist
         if (!target[key]) {
           target[key] = {};
         }
@@ -266,7 +236,6 @@ class BulletStorage {
       let encrypted = cipher.update(data, "utf8", "hex");
       encrypted += cipher.final("hex");
 
-      // Prepend IV for later decryption
       return Buffer.from(iv.toString("hex") + encrypted);
     } catch (err) {
       console.error("Encryption failed:", err);
@@ -288,7 +257,6 @@ class BulletStorage {
     try {
       const key = this._getEncryptionKey();
 
-      // Extract IV from the beginning of the data
       const dataStr = data.toString();
       const iv = Buffer.from(dataStr.slice(0, 32), "hex");
       const encryptedText = dataStr.slice(32);
@@ -315,7 +283,6 @@ class BulletStorage {
       throw new Error("Encryption key is required when encryption is enabled");
     }
 
-    // If it's already a Buffer of the right length, use it directly
     if (
       Buffer.isBuffer(this.options.encryptionKey) &&
       this.options.encryptionKey.length === 32
@@ -323,7 +290,6 @@ class BulletStorage {
       return this.options.encryptionKey;
     }
 
-    // Otherwise, derive a key using SHA-256
     return crypto
       .createHash("sha256")
       .update(String(this.options.encryptionKey))
@@ -337,7 +303,9 @@ class BulletStorage {
    * @public
    */
   getHistoryIterator(options = {}) {
-    return this.historyLog.iterator(options);
+    if (this.options.enableStorageLog) {
+      return this.historyLog.iterator(options);
+    }
   }
 
   /**
@@ -351,7 +319,9 @@ class BulletStorage {
    * @public
    */
   async rebuildFromHistory(options = {}) {
-    console.log("Rebuilding state from history log...");
+    if (!this.options.enableStorageLog) {
+      return;
+    }
 
     const rebuildOptions = {
       clear: false,
@@ -361,14 +331,12 @@ class BulletStorage {
       ...options,
     };
 
-    // Clear existing state if requested
     if (rebuildOptions.clear) {
       this.bullet.store = {};
       this.bullet.meta = {};
       this.bullet.log = [];
     }
 
-    // Create an iterator for the history log
     const iterator = this.historyLog.iterator({
       filter: (entry) => {
         if (
@@ -389,7 +357,6 @@ class BulletStorage {
       },
     });
 
-    // Process all entries
     let entryCount = 0;
 
     await iterator.forEach((entry) => {
@@ -397,11 +364,9 @@ class BulletStorage {
         const currentMeta = this.bullet.meta[entry.path] || { timestamp: 0 };
 
         if (entry.timestamp > currentMeta.timestamp) {
-          // Apply the data change directly without triggering hooks
           const parts = entry.path.split("/").filter(Boolean);
           let current = this.bullet.store;
 
-          // Navigate to the parent node
           for (let i = 0; i < parts.length - 1; i++) {
             const part = parts[i];
             if (!current[part]) {
@@ -410,19 +375,16 @@ class BulletStorage {
             current = current[part];
           }
 
-          // Set the value
           const lastPart = parts[parts.length - 1];
           if (lastPart) {
             current[lastPart] = entry.data;
           }
 
-          // Update metadata
           this.bullet.meta[entry.path] = {
             timestamp: entry.timestamp,
             source: entry.source || "historyLog",
           };
 
-          // Add to in-memory log
           this.bullet.log.push({
             op: "set",
             path: entry.path,
@@ -430,7 +392,6 @@ class BulletStorage {
             timestamp: entry.timestamp,
           });
 
-          // Trim in-memory log if too large
           if (this.bullet.log.length > 1000) {
             this.bullet.log = this.bullet.log.slice(-1000);
           }
@@ -457,14 +418,11 @@ class BulletStorage {
   async queryHistory(options = {}) {
     const { pathPattern, filter, limit = 100, reverse = true } = options;
 
-    // Create a combined filter function
     const combinedFilter = (entry) => {
-      // Apply path pattern if specified
       if (pathPattern && !new RegExp(pathPattern).test(entry.path)) {
         return false;
       }
 
-      // Apply custom filter if specified
       if (filter && !filter(entry)) {
         return false;
       }
@@ -472,13 +430,11 @@ class BulletStorage {
       return true;
     };
 
-    // Create an iterator
     const iterator = this.historyLog.iterator({
       filter: combinedFilter,
       reverse: reverse,
     });
 
-    // Find matching entries
     const entries = await iterator.find(() => true, limit);
     return entries;
   }
@@ -490,7 +446,9 @@ class BulletStorage {
    */
   async save() {
     this._saveData();
-    return this.historyLog.flush();
+    if (this.options.enableStorageLog) {
+      return this.historyLog.flush();
+    }
   }
 
   /**
@@ -502,13 +460,11 @@ class BulletStorage {
       clearInterval(this.saveInterval);
     }
 
-    // Final save
     this._saveData();
 
-    // Close history log
-    await this.historyLog.close();
-
-    console.log("BulletStorage closed");
+    if (this.options.enableStorageLog) {
+      await this.historyLog.close();
+    }
   }
 }
 

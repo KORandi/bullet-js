@@ -1,25 +1,18 @@
-/**
- * Bullet-Middleware.js - Middleware and hooks system for Bullet.js
- */
-
 class BulletMiddleware {
   constructor(bullet) {
     this.bullet = bullet;
 
-    // Middleware stacks for different operations
     this.middleware = {
-      get: [], // Before getting data
-      put: [], // Before setting data
-      afterGet: [], // After getting data
-      afterPut: [], // After setting data
-      delete: [], // Before deleting data
-      afterDelete: [], // After deleting data
+      get: [],
+      put: [],
+      afterGet: [],
+      afterPut: [],
+      delete: [],
+      afterDelete: [],
     };
 
-    // Event listeners
     this.eventListeners = {};
 
-    // Hook into bullet methods
     this._setupHooks();
   }
 
@@ -28,15 +21,12 @@ class BulletMiddleware {
    * @private
    */
   _setupHooks() {
-    // Save original methods
     const originalGetData = this.bullet._getData.bind(this.bullet);
     const originalSetData = this.bullet._setData.bind(this.bullet);
 
-    // Override _getData
     this.bullet._getData = (path) => {
       let modifiedPath = path;
 
-      // Execute 'get' middleware
       for (const middleware of this.middleware.get) {
         try {
           const result = middleware(modifiedPath);
@@ -53,10 +43,8 @@ class BulletMiddleware {
         }
       }
 
-      // Get data using original method
       let data = originalGetData(modifiedPath);
 
-      // Execute 'afterGet' middleware
       for (const middleware of this.middleware.afterGet) {
         try {
           const result = middleware(modifiedPath, data);
@@ -74,13 +62,11 @@ class BulletMiddleware {
         }
       }
 
-      // Emit data read event
       this._emitEvent("read", { path: modifiedPath, data });
 
       return data;
     };
 
-    // Override _setData
     this.bullet._setData = (
       path,
       data,
@@ -91,13 +77,11 @@ class BulletMiddleware {
       let modifiedData = data;
       let shouldContinue = true;
 
-      // Execute 'put' middleware
       for (const middleware of this.middleware.put) {
         try {
           const result = middleware(modifiedPath, modifiedData, timestamp);
 
           if (result === false) {
-            // Middleware explicitly stopped the operation
             shouldContinue = false;
             break;
           } else if (result !== undefined && result !== null) {
@@ -106,11 +90,9 @@ class BulletMiddleware {
               "path" in result &&
               "data" in result
             ) {
-              // Middleware returned a new path and data
               modifiedPath = result.path;
               modifiedData = result.data;
             } else {
-              // Middleware just modified the data
               modifiedData = result;
             }
           }
@@ -127,15 +109,11 @@ class BulletMiddleware {
         }
       }
 
-      // Proceed with set operation if allowed
       if (shouldContinue) {
-        // Get existing data for diff
         const oldData = originalGetData(modifiedPath);
 
-        // Set data using original method
         originalSetData(modifiedPath, modifiedData, timestamp, broadcast);
 
-        // Execute 'afterPut' middleware
         for (const middleware of this.middleware.afterPut) {
           try {
             middleware(modifiedPath, modifiedData, oldData, timestamp);
@@ -151,7 +129,6 @@ class BulletMiddleware {
           }
         }
 
-        // Emit data write event
         this._emitEvent("write", {
           path: modifiedPath,
           data: modifiedData,
@@ -163,13 +140,11 @@ class BulletMiddleware {
       return shouldContinue;
     };
 
-    // Add delete method to BulletNode if it doesn't exist
     if (!this.bullet.BulletNode.prototype.delete) {
       this.bullet.BulletNode.prototype.delete = function () {
         let shouldContinue = true;
         const path = this.path;
 
-        // Execute 'delete' middleware
         for (const middleware of this.bullet.middleware.middleware.delete) {
           try {
             const result = middleware(path);
@@ -190,13 +165,10 @@ class BulletMiddleware {
         }
 
         if (shouldContinue) {
-          // Get existing data for event
           const oldData = this.bullet._getData(path);
 
-          // Set to null/undefined to delete
           this.bullet._setData(path, null);
 
-          // Execute 'afterDelete' middleware
           for (const middleware of this.bullet.middleware.middleware
             .afterDelete) {
             try {
@@ -212,7 +184,6 @@ class BulletMiddleware {
             }
           }
 
-          // Emit delete event
           this.bullet.middleware._emitEvent("delete", { path, oldData });
         }
 
@@ -220,7 +191,6 @@ class BulletMiddleware {
       };
     }
 
-    // Store this for access from BulletNode
     this.bullet.middleware = this;
   }
 
@@ -337,7 +307,6 @@ class BulletMiddleware {
       }
     }
 
-    // Also emit to 'all' listeners
     if (this.eventListeners["all"]) {
       for (const listener of this.eventListeners["all"]) {
         try {
@@ -423,7 +392,6 @@ class BulletMiddleware {
         ? (path) => path === pathPattern || path.startsWith(pathPattern + "/")
         : (path) => pathPattern.test(path);
 
-    // Encrypt on write
     this.beforePut((path, data) => {
       if (!matcher(path) || typeof data !== "object" || data === null) {
         return data;
@@ -444,7 +412,6 @@ class BulletMiddleware {
       return result;
     });
 
-    // Decrypt on read
     this.afterGet((path, data) => {
       if (!matcher(path) || typeof data !== "object" || data === null) {
         return data;

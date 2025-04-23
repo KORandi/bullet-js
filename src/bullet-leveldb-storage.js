@@ -1,7 +1,3 @@
-/**
- * Bullet-LevelDB-Storage.js - LevelDB persistence layer for Bullet.js
- */
-
 const crypto = require("crypto");
 const { Level } = require("level");
 const path = require("path");
@@ -11,7 +7,7 @@ class BulletLevelDBStorage {
     this.bullet = bullet;
     this.options = {
       path: "./.bullet-leveldb",
-      saveInterval: 5000, // 5 seconds
+      saveInterval: 5000,
       encrypt: false,
       encryptionKey: null,
       prefix: {
@@ -19,21 +15,18 @@ class BulletLevelDBStorage {
         meta: "meta:",
         log: "log:",
       },
-      logLimit: 1000, // Maximum number of log entries to keep
+      logLimit: 1000,
       ...options,
     };
 
-    // DB instance
     this.db = null;
 
-    // Track persisted state to optimize saves
     this.persisted = {
       store: {},
       meta: {},
       log: [],
     };
 
-    // Initialize persistence
     this._initPersistence();
   }
 
@@ -43,25 +36,20 @@ class BulletLevelDBStorage {
    */
   _initPersistence() {
     try {
-      // Open levelDB using the correct constructor from the Level package
       this.db = new Level(this.options.path);
 
-      // Load existing data
       this._loadData()
         .then(() => {
           console.log("BulletLevelDBStorage: Data loaded successfully");
 
-          // Start periodic save
           this.saveInterval = setInterval(() => {
             this.save();
           }, this.options.saveInterval);
 
-          // Setup save on exit
           process.on("exit", () => {
             this.save();
           });
 
-          // Handle other exit signals
           ["SIGINT", "SIGTERM", "SIGQUIT"].forEach((signal) => {
             process.on(signal, () => {
               this.save();
@@ -86,12 +74,10 @@ class BulletLevelDBStorage {
    */
   async _loadData() {
     try {
-      // Create promises for loading store, meta, and log data
       const loadStore = this._loadStoreData();
       const loadMeta = this._loadMetaData();
       const loadLog = this._loadLogData();
 
-      // Wait for all data to load
       await Promise.all([loadStore, loadMeta, loadLog]);
 
       return true;
@@ -111,17 +97,14 @@ class BulletLevelDBStorage {
     const storePrefix = this.options.prefix.store;
 
     try {
-      // Use iterator for level v8+
       const iterator = this.db.iterator({
         gte: storePrefix,
         lte: storePrefix + "\uffff",
       });
 
       for await (const [key, value] of iterator) {
-        // Remove prefix from key
         const path = key.slice(storePrefix.length);
 
-        // Parse the value - level auto-stringifies now
         let parsedValue;
         try {
           parsedValue = typeof value === "string" ? JSON.parse(value) : value;
@@ -129,12 +112,10 @@ class BulletLevelDBStorage {
           parsedValue = value;
         }
 
-        // Handle path with slash notation
         if (path.includes("/")) {
           const parts = path.split("/").filter(Boolean);
           let current = storeData;
 
-          // Navigate through the parts to build the nested structure
           for (let i = 0; i < parts.length - 1; i++) {
             const part = parts[i];
             if (!current[part]) {
@@ -143,17 +124,14 @@ class BulletLevelDBStorage {
             current = current[part];
           }
 
-          // Set the value at the leaf
           const lastPart = parts[parts.length - 1];
 
-          // If encrypted, decrypt the data
           if (this.options.encrypt && typeof parsedValue === "string") {
             current[lastPart] = this._decrypt(parsedValue);
           } else {
             current[lastPart] = parsedValue;
           }
         } else {
-          // Top level path without slashes
           if (this.options.encrypt && typeof parsedValue === "string") {
             storeData[path] = this._decrypt(parsedValue);
           } else {
@@ -162,10 +140,8 @@ class BulletLevelDBStorage {
         }
       }
 
-      // Merge with existing store
       this._deepMerge(this.bullet.store, storeData);
 
-      // Update persisted state
       this.persisted.store = JSON.parse(JSON.stringify(this.bullet.store));
 
       return true;
@@ -185,17 +161,14 @@ class BulletLevelDBStorage {
     const metaPrefix = this.options.prefix.meta;
 
     try {
-      // Use iterator for level v8+
       const iterator = this.db.iterator({
         gte: metaPrefix,
         lte: metaPrefix + "\uffff",
       });
 
       for await (const [key, value] of iterator) {
-        // Remove prefix from key
         const path = key.slice(metaPrefix.length);
 
-        // Parse the value
         let parsedValue;
         try {
           parsedValue = typeof value === "string" ? JSON.parse(value) : value;
@@ -203,7 +176,6 @@ class BulletLevelDBStorage {
           parsedValue = value;
         }
 
-        // If encrypted, decrypt the data
         if (this.options.encrypt && typeof parsedValue === "string") {
           metaData[path] = this._decrypt(parsedValue);
         } else {
@@ -211,10 +183,8 @@ class BulletLevelDBStorage {
         }
       }
 
-      // Merge with existing metadata
       Object.assign(this.bullet.meta, metaData);
 
-      // Update persisted state
       this.persisted.meta = JSON.parse(JSON.stringify(this.bullet.meta));
 
       return true;
@@ -234,14 +204,12 @@ class BulletLevelDBStorage {
     const logPrefix = this.options.prefix.log;
 
     try {
-      // Use iterator for level v8+
       const iterator = this.db.iterator({
         gte: logPrefix,
         lte: logPrefix + "\uffff",
       });
 
       for await (const [key, value] of iterator) {
-        // Parse the value
         let parsedValue;
         try {
           parsedValue = typeof value === "string" ? JSON.parse(value) : value;
@@ -249,7 +217,6 @@ class BulletLevelDBStorage {
           parsedValue = value;
         }
 
-        // If encrypted, decrypt the data
         if (this.options.encrypt && typeof parsedValue === "string") {
           logEntries.push(this._decrypt(parsedValue));
         } else {
@@ -257,18 +224,14 @@ class BulletLevelDBStorage {
         }
       }
 
-      // Sort log entries by timestamp
       logEntries.sort((a, b) => a.timestamp - b.timestamp);
 
-      // Merge with existing log
       this.bullet.log = [...this.bullet.log, ...logEntries];
 
-      // Trim log if too large
       if (this.bullet.log.length > this.options.logLimit) {
         this.bullet.log = this.bullet.log.slice(-this.options.logLimit);
       }
 
-      // Update persisted state
       this.persisted.log = [...this.bullet.log];
 
       return true;
@@ -285,25 +248,18 @@ class BulletLevelDBStorage {
    */
   async save() {
     try {
-      // Check if anything has changed
       if (this._hasChanges()) {
-        // Create batch operations array
         const operations = [];
 
-        // Add store data operations
         await this._saveStoreData(operations);
 
-        // Add metadata operations
         await this._saveMetaData(operations);
 
-        // Add transaction log operations
         await this._saveLogData(operations);
 
-        // Execute batch operations
         if (operations.length > 0) {
           await this.db.batch(operations);
 
-          // Update persisted state
           this.persisted.store = JSON.parse(JSON.stringify(this.bullet.store));
           this.persisted.meta = JSON.parse(JSON.stringify(this.bullet.meta));
           this.persisted.log = [...this.bullet.log];
@@ -328,16 +284,13 @@ class BulletLevelDBStorage {
    * @private
    */
   async _saveStoreData(operations) {
-    // Flatten the store object into key-value pairs
     const flattenedStore = this._flattenObject(this.bullet.store);
     const storePrefix = this.options.prefix.store;
 
-    // Add each flattened path to the operations
     for (const [path, value] of Object.entries(flattenedStore)) {
       const key = storePrefix + path;
       let storeValue = value;
 
-      // Encode value for storage
       if (this.options.encrypt) {
         storeValue = this._encrypt(JSON.stringify(value));
       } else {
@@ -359,12 +312,10 @@ class BulletLevelDBStorage {
   async _saveMetaData(operations) {
     const metaPrefix = this.options.prefix.meta;
 
-    // Add each metadata entry to the operations
     for (const [path, value] of Object.entries(this.bullet.meta)) {
       const key = metaPrefix + path;
       let metaValue = value;
 
-      // Encode value for storage
       if (this.options.encrypt) {
         metaValue = this._encrypt(JSON.stringify(value));
       } else {
@@ -386,16 +337,13 @@ class BulletLevelDBStorage {
   async _saveLogData(operations) {
     const logPrefix = this.options.prefix.log;
 
-    // First, clear existing log entries
     await this._clearLogEntries(operations);
 
-    // Add each log entry to the operations with a timestamp-based key
     for (let i = 0; i < this.bullet.log.length; i++) {
       const entry = this.bullet.log[i];
       const key = `${logPrefix}${entry.timestamp}_${i}`;
       let logValue;
 
-      // Encode value for storage
       if (this.options.encrypt) {
         logValue = this._encrypt(JSON.stringify(entry));
       } else {
@@ -419,7 +367,6 @@ class BulletLevelDBStorage {
       const logPrefix = this.options.prefix.log;
       const keysToDelete = [];
 
-      // Use iterator to find keys
       const iterator = this.db.iterator({
         gte: logPrefix,
         lte: logPrefix + "\uffff",
@@ -431,7 +378,6 @@ class BulletLevelDBStorage {
         keysToDelete.push(key);
       }
 
-      // Add delete operations
       for (const key of keysToDelete) {
         operations.push({ type: "del", key });
       }
@@ -461,10 +407,8 @@ class BulletLevelDBStorage {
         typeof value === "object" &&
         !Array.isArray(value)
       ) {
-        // Recursively flatten nested objects
         Object.assign(result, this._flattenObject(value, path));
       } else {
-        // Add leaf value
         result[path] = value;
       }
     }
@@ -478,12 +422,10 @@ class BulletLevelDBStorage {
    * @private
    */
   _hasChanges() {
-    // Compare log lengths as a quick check
     if (this.bullet.log.length !== this.persisted.log.length) {
       return true;
     }
 
-    // Check for different timestamps in meta
     for (const path in this.bullet.meta) {
       if (
         !this.persisted.meta[path] ||
@@ -493,8 +435,6 @@ class BulletLevelDBStorage {
       }
     }
 
-    // Deep comparison is expensive, so we rely on metadata changes
-    // as a proxy for data changes
     return false;
   }
 
@@ -511,7 +451,6 @@ class BulletLevelDBStorage {
         typeof source[key] === "object" &&
         !Array.isArray(source[key])
       ) {
-        // Create the property if it doesn't exist
         if (!target[key]) {
           target[key] = {};
         }
@@ -544,7 +483,6 @@ class BulletLevelDBStorage {
       let encrypted = cipher.update(data, "utf8", "hex");
       encrypted += cipher.final("hex");
 
-      // Prepend IV for later decryption
       return iv.toString("hex") + encrypted;
     } catch (err) {
       console.error("Encryption failed:", err);
@@ -566,7 +504,6 @@ class BulletLevelDBStorage {
     try {
       const key = this._getEncryptionKey();
 
-      // Extract IV from the beginning of the data
       const dataStr = data.toString();
       const iv = Buffer.from(dataStr.slice(0, 32), "hex");
       const encryptedText = dataStr.slice(32);
@@ -593,7 +530,6 @@ class BulletLevelDBStorage {
       throw new Error("Encryption key is required when encryption is enabled");
     }
 
-    // If it's already a Buffer of the right length, use it directly
     if (
       Buffer.isBuffer(this.options.encryptionKey) &&
       this.options.encryptionKey.length === 32
@@ -601,7 +537,6 @@ class BulletLevelDBStorage {
       return this.options.encryptionKey;
     }
 
-    // Otherwise, derive a key using SHA-256
     return crypto
       .createHash("sha256")
       .update(String(this.options.encryptionKey))
@@ -618,10 +553,8 @@ class BulletLevelDBStorage {
         clearInterval(this.saveInterval);
       }
 
-      // Final save
       await this.save();
 
-      // Close LevelDB
       if (this.db) {
         await this.db.close();
       }
