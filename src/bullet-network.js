@@ -16,7 +16,7 @@ class BulletNetwork extends EventEmitter {
       maxTTL: 32,
       messageCacheSize: 10000,
       syncInterval: 30000,
-      batchSize: 100,
+      batchSize: 200,
       batchDelay: 500,
       ...options,
     };
@@ -32,7 +32,6 @@ class BulletNetwork extends EventEmitter {
     }
 
     this._connectToPeers();
-    this._startSyncCycle();
   }
 
   /**
@@ -468,18 +467,6 @@ class BulletNetwork extends EventEmitter {
     });
 
     return updates;
-  }
-
-  /**
-   * Start the periodic sync cycle
-   * @private
-   */
-  _startSyncCycle() {
-    this.syncInterval = setInterval(() => {
-      this.connections.forEach((socket, peerId) => {
-        this._sendSyncRequest(socket);
-      });
-    }, this.options.syncInterval);
   }
 
   /**

@@ -14,10 +14,10 @@ const fs = require("fs");
 const path = require("path");
 
 // Configuration
-const NUM_NODES = 32;
+const NUM_NODES = 2;
 const BASE_PORT = 8000;
 const DATA_UPDATE_INTERVAL = 5000; // Update data every 5 seconds
-const LOG_DIR = path.join(__dirname, "chain_logs");
+const LOG_DIR = path.join(__dirname, "../data/chain_logs");
 
 // Ensure log directory exists
 if (!fs.existsSync(LOG_DIR)) {
@@ -50,12 +50,12 @@ function createPeerNode(nodeId, port, peerUrls, position) {
     const logFile = path.join('${LOG_DIR}', 'node-${nodeId}.log');
     const logger = fs.createWriteStream(logFile, { flags: 'a' });
     
-    // Custom console log that writes to file
+    // Custom // console.log that writes to file
     const log = (message) => {
       const timestamp = new Date().toISOString();
       const formattedMessage = \`[\${timestamp}] Node ${nodeId} (Position ${position}): \${message}\n\`;
       logger.write(formattedMessage);
-      console.log(formattedMessage);
+      // console.log(formattedMessage);
     };
     
     // Initialize the node
@@ -122,12 +122,12 @@ function createPeerNode(nodeId, port, peerUrls, position) {
       // Update node data
       const currentData = bullet.get(nodePath).value() || {};
       
-      bullet.get(nodePath).put({
-        ...currentData,
-        dataUpdates: (currentData.dataUpdates || 0) + 1,
-        lastUpdate: new Date().toISOString(),
-        message: \`Hello from Node ${nodeId} at \${new Date().toISOString()}\`
-      });
+      // bullet.get(nodePath).put({
+      //   ...currentData,
+      //   dataUpdates: (currentData.dataUpdates || 0) + 1,
+      //   lastUpdate: new Date().toISOString(),
+      //   message: \`Hello from Node ${nodeId} at \${new Date().toISOString()}\`
+      // });
       
       // Every 3rd update, create a message that should propagate through the chain
       if ((currentData.dataUpdates || 0) % 3 === 0) {
@@ -140,7 +140,7 @@ function createPeerNode(nodeId, port, peerUrls, position) {
           hopCount: 0
         };
         
-        bullet.get(\`messages/${nodeId}/\${messageId}\`).put(messageData);
+        // bullet.get(\`messages/${nodeId}/\${messageId}\`).put(messageData);
         log(\`Created new propagation test message: \${JSON.stringify(messageData)}\`);
       }
       
@@ -211,9 +211,9 @@ function createPeerNode(nodeId, port, peerUrls, position) {
   });
 
   // Log process info
-  console.log(
-    `Started Node ${nodeId} (Position ${position}) with PID ${nodeProcess.pid}`
-  );
+  // console.log(
+  //   `Started Node ${nodeId} (Position ${position}) with PID ${nodeProcess.pid}`
+  // );
 
   return nodeProcess;
 }
@@ -685,15 +685,7 @@ function createMonitorServer() {
     }
   });
 
-  server.listen(monitorPort, () => {
-    console.log(`Monitor server running at http://localhost:${monitorPort}`);
-    console.log(
-      `View network status at http://localhost:${monitorPort}/status`
-    );
-    console.log(
-      `View network visualization at http://localhost:${monitorPort}/visualization`
-    );
-  });
+  server.listen(monitorPort, () => {});
 
   return server;
 }
@@ -735,7 +727,7 @@ function fetchNodeStatus(url) {
  * Main function to start the network
  */
 function main() {
-  console.log(`Starting a chain network with ${NUM_NODES} nodes`);
+  // console.log(`Starting a chain network with ${NUM_NODES} nodes`);
 
   // Create the chain network
   const nodes = createChainNetwork();
@@ -743,17 +735,17 @@ function main() {
   // Create a monitor server
   const monitorServer = createMonitorServer();
 
-  console.log("\nNetwork initialization complete");
-  console.log(`Started ${nodes.length} nodes in a linear chain`);
-  console.log(`Each node connects only to its immediate neighbors`);
-  console.log(
-    `Nodes will update their data every ${DATA_UPDATE_INTERVAL / 1000} seconds`
-  );
-  console.log(`Log files are stored in the '${LOG_DIR}' directory`);
+  // console.log("\nNetwork initialization complete");
+  // console.log(`Started ${nodes.length} nodes in a linear chain`);
+  // console.log(`Each node connects only to its immediate neighbors`);
+  // console.log(
+  //   `Nodes will update their data every ${DATA_UPDATE_INTERVAL / 1000} seconds`
+  // );
+  // console.log(`Log files are stored in the '${LOG_DIR}' directory`);
 
   // Handle graceful shutdown
   process.on("SIGINT", () => {
-    console.log("\nShutting down chain network...");
+    // console.log("\nShutting down chain network...");
 
     // Close monitor server
     monitorServer.close();
@@ -778,11 +770,11 @@ function main() {
       }
     });
 
-    console.log("Shutdown complete");
+    // console.log("Shutdown complete");
     process.exit(0);
   });
 
-  console.log("\nPress Ctrl+C to stop the network");
+  // console.log("\nPress Ctrl+C to stop the network");
 }
 
 // Run the main function
