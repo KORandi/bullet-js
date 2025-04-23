@@ -63,7 +63,8 @@ function createPeerNode(nodeId, port, peerUrls) {
       storage: true,
       storagePath: './data/node-${nodeId}',
       enableIndexing: true,
-      enableMiddleware: true
+      enableMiddleware: true,
+      syncInterval: 1000
     });
     
     // Node information for data path

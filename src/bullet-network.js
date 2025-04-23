@@ -13,30 +13,22 @@ class BulletNetwork extends EventEmitter {
       port: 8765,
       host: "0.0.0.0",
       peers: [],
+      maxTTL: 32,
+      messageCacheSize: 10000,
+      syncInterval: 30000,
       ...options,
     };
 
-    // Map of peer connections
     this.connections = new Map();
-
-    // Last sync timestamp for differential updates
     this.lastSync = {};
-
-    // Message queue for reliability
     this.messageQueue = [];
-
-    // Track processed message IDs to prevent duplicates
     this.processedMessages = new Set();
 
-    // Initialize network
     if (this.options.server !== false) {
       this._initServer();
     }
 
-    // Connect to peers
     this._connectToPeers();
-
-    // Start sync cycle
     this._startSyncCycle();
   }
 
@@ -106,14 +98,12 @@ class BulletNetwork extends EventEmitter {
         console.log(`Connected to peer: ${peerUrl}`);
         this._handleNewPeer(socket, peerUrl);
 
-        // Send initial sync request
         this._sendSyncRequest(socket);
       });
 
       socket.on("error", (error) => {
         console.error(`Error connecting to peer ${peerUrl}:`, error);
 
-        // Schedule reconnection
         setTimeout(() => {
           this._connectToPeer(peerUrl);
         }, 5000);
@@ -130,10 +120,8 @@ class BulletNetwork extends EventEmitter {
    * @private
    */
   _handleNewPeer(socket, peerId) {
-    // Store the connection
     this.connections.set(peerId, socket);
 
-    // Setup message handling
     socket.on("message", (message) => {
       try {
         const data = JSON.parse(message);
@@ -143,12 +131,10 @@ class BulletNetwork extends EventEmitter {
       }
     });
 
-    // Handle disconnection
     socket.on("close", () => {
       console.log(`Peer disconnected: ${peerId}`);
       this.connections.delete(peerId);
 
-      // If this was a known peer, schedule reconnection
       if (this.options.peers.includes(peerId)) {
         setTimeout(() => {
           this._connectToPeer(peerId);
@@ -156,7 +142,6 @@ class BulletNetwork extends EventEmitter {
       }
     });
 
-    // Notify about new peer
     this.emit("peer:connect", peerId);
   }
 
@@ -169,19 +154,16 @@ class BulletNetwork extends EventEmitter {
   _handlePeerMessage(peerId, message) {
     if (!message || !message.type) return;
 
-    // Check if we've already processed this message
     if (message.id && this.processedMessages.has(message.id)) {
       return;
     }
 
-    // Mark as processed to prevent duplicates
     if (message.id) {
       this.processedMessages.add(message.id);
 
-      // Limit the size of the processed set
-      if (this.processedMessages.size > 10000) {
+      if (this.processedMessages.size > this.options.messageCacheSize) {
         const iterator = this.processedMessages.values();
-        for (let i = 0; i < 1000; i++) {
+        for (let i = 0; i < this.options.messageCacheSize / 10; i++) {
           this.processedMessages.delete(iterator.next().value);
         }
       }
@@ -238,15 +220,12 @@ class BulletNetwork extends EventEmitter {
     const updates = message.updates || [];
 
     updates.forEach((update) => {
-      // Apply updates if they're newer than what we have
       const currentData = this.bullet._getData(update.path);
       const currentMeta = this.bullet.meta[update.path] || { timestamp: 0 };
 
       if (update.timestamp > currentMeta.timestamp) {
-        // Update our data
-        this.bullet._setData(update.path, update.data, update.timestamp);
+        this.bullet._setData(update.path, update.data, update.timestamp, false);
 
-        // Update metadata
         this.bullet.meta[update.path] = {
           timestamp: update.timestamp,
           source: peerId,
@@ -254,7 +233,6 @@ class BulletNetwork extends EventEmitter {
       }
     });
 
-    // Update last sync time for this peer
     this.lastSync[peerId] = message.timestamp;
   }
 
@@ -265,23 +243,23 @@ class BulletNetwork extends EventEmitter {
    * @private
    */
   _handlePut(peerId, message) {
-    const { path, data, timestamp } = message;
+    const { path, data, timestamp, ttl } = message;
 
-    // Check if this update is newer than what we have
+    if (ttl !== undefined && ttl <= 0) {
+      return;
+    }
+
     const currentMeta = this.bullet.meta[path] || { timestamp: 0 };
 
     if (timestamp > currentMeta.timestamp) {
-      // Update our data
-      this.bullet._setData(path, data, timestamp);
+      this.bullet._setData(path, data, timestamp, false);
 
-      // Update metadata
       this.bullet.meta[path] = {
         timestamp,
         source: peerId,
       };
 
-      // Propagate to other peers (except the source)
-      this._broadcastMessage(message, [peerId]);
+      this._broadcastMessage(message);
     }
   }
 
@@ -294,7 +272,6 @@ class BulletNetwork extends EventEmitter {
   _getUpdatesSince(lastSync) {
     const updates = [];
 
-    // Filter the transaction log for new updates
     this.bullet.log.forEach((entry) => {
       const pathTimestamp = lastSync[entry.path] || 0;
 
@@ -319,7 +296,7 @@ class BulletNetwork extends EventEmitter {
       this.connections.forEach((socket, peerId) => {
         this._sendSyncRequest(socket);
       });
-    }, 30000); // Sync every 30 seconds
+    }, this.options.syncInterval);
   }
 
   /**
@@ -347,18 +324,27 @@ class BulletNetwork extends EventEmitter {
   /**
    * Broadcast a message to connected peers
    * @param {Object} message - Message to broadcast
-   * @param {Array} excludePeers - List of peer IDs to exclude
    * @private
    */
-  _broadcastMessage(message, excludePeers = []) {
-    const messageStr = JSON.stringify({
+  _broadcastMessage(message) {
+    if (message.ttl !== undefined && message.ttl <= 0) {
+      return;
+    }
+
+    const messageWithId = {
       ...message,
       id: message.id || this._generateId(),
-    });
+    };
+
+    if (messageWithId.ttl !== undefined) {
+      messageWithId.ttl = messageWithId.ttl - 1;
+    } else {
+      messageWithId.ttl = this.options.maxTTL - 1;
+    }
+
+    const messageStr = JSON.stringify(messageWithId);
 
     this.connections.forEach((socket, peerId) => {
-      if (excludePeers.includes(peerId)) return;
-
       try {
         if (socket.readyState === WebSocket.OPEN) {
           socket.send(messageStr);
@@ -378,11 +364,15 @@ class BulletNetwork extends EventEmitter {
    */
   broadcast(path, data, timestamp = Date.now()) {
     const message = {
+      id: this._generateId(),
       type: "put",
       path,
       data,
       timestamp,
+      ttl: this.options.maxTTL,
     };
+
+    this.processedMessages.add(message.id);
 
     this._broadcastMessage(message);
   }
@@ -393,7 +383,7 @@ class BulletNetwork extends EventEmitter {
    * @private
    */
   _generateId() {
-    return "msg-" + Math.random().toString(36).substr(2, 9);
+    return "msg-" + Math.random().toString(36).substr(2, 9) + "-" + Date.now();
   }
 
   /**
@@ -401,12 +391,10 @@ class BulletNetwork extends EventEmitter {
    * @public
    */
   close() {
-    // Clear sync interval
     if (this.syncInterval) {
       clearInterval(this.syncInterval);
     }
 
-    // Close all peer connections
     this.connections.forEach((socket, peerId) => {
       try {
         socket.close();
@@ -415,7 +403,6 @@ class BulletNetwork extends EventEmitter {
       }
     });
 
-    // Close server if it exists
     if (this.server) {
       try {
         this.server.close();
