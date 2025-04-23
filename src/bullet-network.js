@@ -18,7 +18,7 @@ class BulletNetwork extends EventEmitter {
       messageCacheSize: 10000,
       syncInterval: 30000,
       batchSize: 100,
-      batchDelay: 500,
+      batchDelay: 13,
       ...options,
     };
 
@@ -204,7 +204,7 @@ class BulletNetwork extends EventEmitter {
               this._setupPeerConnection(socket, remotePeerId, true, peerUrl);
 
               // Initiate sync
-              this._sendSyncRequest(remotePeerId);
+              this._sendInitSyncRequest(remotePeerId);
             }
           } catch (err) {
             console.error("Error handling handshake:", err);
@@ -342,6 +342,10 @@ class BulletNetwork extends EventEmitter {
         this._handleSyncRequest(peerId, message);
         break;
 
+      case "sync-request-full":
+        this._handleSyncRequest(peerId, message, true);
+        break;
+
       case "sync-data":
         this._handleSyncData(peerId, message);
         break;
@@ -363,9 +367,10 @@ class BulletNetwork extends EventEmitter {
    * Handle sync request from a peer
    * @param {string} peerId - Remote peer ID
    * @param {Object} message - Message object
+   * @param {boolean} full - Force full update
    * @private
    */
-  _handleSyncRequest(peerId, message) {
+  async _handleSyncRequest(peerId, message, full = false) {
     const peer = this.peers.get(peerId);
     if (!peer || !peer.socket || peer.socket.readyState !== WebSocket.OPEN) {
       return;
@@ -389,7 +394,7 @@ class BulletNetwork extends EventEmitter {
     }
 
     // Get all updates since last sync
-    const allUpdates = this._getUpdatesSince(lastSync);
+    const allUpdates = await this._getUpdatesSince(lastSync, full);
 
     // If no updates, send empty sync response
     if (allUpdates.length === 0) {
@@ -503,7 +508,6 @@ class BulletNetwork extends EventEmitter {
 
     // Process each update in the batch
     updates.forEach((update) => {
-      const currentData = this.bullet._getData(update.path);
       const currentMeta = this.bullet.meta[update.path] || { timestamp: 0 };
 
       // Only apply if the update is newer
@@ -629,23 +633,37 @@ class BulletNetwork extends EventEmitter {
   /**
    * Get updates since the given timestamps
    * @param {Object} lastSync - Map of paths to timestamps
+   * @param {boolean} full - Force full update
    * @return {Array} - Array of updates
    * @private
    */
-  _getUpdatesSince(lastSync) {
+  async _getUpdatesSince(lastSync, full = false) {
     const updates = [];
+    if (!full) {
+      for (const entry of this.bullet.log) {
+        const pathTimestamp = lastSync[entry.path] || 0;
 
-    this.bullet.log.forEach((entry) => {
-      const pathTimestamp = lastSync[entry.path] || 0;
+        if (entry.timestamp > pathTimestamp) {
+          updates.push({
+            path: entry.path,
+            data: entry.data,
+            timestamp: entry.timestamp,
+          });
+        }
+      }
+    } else {
+      const iterator = this.bullet.storage.getHistoryIterator({
+        reverse: true,
+      });
 
-      if (entry.timestamp > pathTimestamp) {
+      await iterator.forEach((entry) => {
         updates.push({
           path: entry.path,
           data: entry.data,
           timestamp: entry.timestamp,
         });
-      }
-    });
+      });
+    }
 
     return updates;
   }
@@ -693,6 +711,16 @@ class BulletNetwork extends EventEmitter {
       type: "sync-request",
       requestId: this._generateId(),
       lastSync: lastSyncTimes,
+      timestamp: Date.now(),
+    });
+  }
+
+  _sendInitSyncRequest(peerId) {
+    this._sendToPeer(peerId, {
+      id: this._generateId(),
+      type: "sync-request-full",
+      requestId: this._generateId(),
+      lastSync: null,
       timestamp: Date.now(),
     });
   }

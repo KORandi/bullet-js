@@ -14,7 +14,7 @@ const fs = require("fs");
 const path = require("path");
 
 // Configuration
-const NUM_NODES = 2;
+const NUM_NODES = 6;
 const BASE_PORT = 8000;
 const DATA_UPDATE_INTERVAL = 5000; // Update data every 5 seconds
 const LOG_DIR = path.join(__dirname, "../data/chain_logs");
