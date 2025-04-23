@@ -16,6 +16,8 @@ class BulletNetwork extends EventEmitter {
       maxTTL: 32,
       messageCacheSize: 10000,
       syncInterval: 30000,
+      batchSize: 100,
+      batchDelay: 500,
       ...options,
     };
 
@@ -23,6 +25,7 @@ class BulletNetwork extends EventEmitter {
     this.lastSync = {};
     this.messageQueue = [];
     this.processedMessages = new Set();
+    this.activeSyncBatches = new Map();
 
     if (this.options.server !== false) {
       this._initServer();
@@ -178,6 +181,10 @@ class BulletNetwork extends EventEmitter {
         this._handleSyncData(peerId, message);
         break;
 
+      case "sync-ack":
+        this._handleSyncAck(peerId, message);
+        break;
+
       case "put":
         this._handlePut(peerId, message);
         break;
@@ -197,17 +204,107 @@ class BulletNetwork extends EventEmitter {
     const socket = this.connections.get(peerId);
     if (!socket) return;
 
+    const requestId = message.requestId || this._generateId();
     const lastSync = message.lastSync || {};
-    const updates = this._getUpdatesSince(lastSync);
 
-    socket.send(
-      JSON.stringify({
-        id: this._generateId(),
-        type: "sync-data",
-        updates,
-        timestamp: Date.now(),
-      })
-    );
+    if (this.activeSyncBatches.has(peerId)) {
+      socket.send(
+        JSON.stringify({
+          id: this._generateId(),
+          type: "sync-status",
+          requestId: requestId,
+          status: "in-progress",
+          message: "Sync already in progress",
+        })
+      );
+      return;
+    }
+
+    const allUpdates = this._getUpdatesSince(lastSync);
+
+    if (allUpdates.length === 0) {
+      socket.send(
+        JSON.stringify({
+          id: this._generateId(),
+          type: "sync-data",
+          requestId: requestId,
+          updates: [],
+          complete: true,
+          batchIndex: 0,
+          totalBatches: 0,
+          timestamp: Date.now(),
+        })
+      );
+      return;
+    }
+
+    const totalBatches = Math.ceil(allUpdates.length / this.options.batchSize);
+
+    this.activeSyncBatches.set(peerId, {
+      updates: allUpdates,
+      requestId: requestId,
+      totalBatches: totalBatches,
+      currentBatch: 0,
+      startTime: Date.now(),
+    });
+
+    this._sendNextSyncBatch(peerId);
+  }
+
+  /**
+   * Send the next batch of sync data to a peer
+   * @param {string} peerId - Unique identifier for the peer
+   * @private
+   */
+  _sendNextSyncBatch(peerId) {
+    const socket = this.connections.get(peerId);
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      this.activeSyncBatches.delete(peerId);
+      return;
+    }
+
+    const batchInfo = this.activeSyncBatches.get(peerId);
+    if (!batchInfo) return;
+
+    const { updates, requestId, totalBatches, currentBatch } = batchInfo;
+
+    const start = currentBatch * this.options.batchSize;
+    const end = Math.min(start + this.options.batchSize, updates.length);
+
+    const batchUpdates = updates.slice(start, end);
+
+    const isLastBatch = currentBatch === totalBatches - 1;
+
+    try {
+      socket.send(
+        JSON.stringify({
+          id: this._generateId(),
+          type: "sync-data",
+          requestId: requestId,
+          updates: batchUpdates,
+          batchIndex: currentBatch,
+          totalBatches: totalBatches,
+          complete: isLastBatch,
+          timestamp: Date.now(),
+        })
+      );
+
+      console.log(
+        `Sent sync batch ${
+          currentBatch + 1
+        }/${totalBatches} to ${peerId} with ${batchUpdates.length} updates`
+      );
+
+      batchInfo.currentBatch++;
+
+      if (isLastBatch) {
+        this.activeSyncBatches.delete(peerId);
+        console.log(`Completed batched sync with ${peerId}`);
+      }
+    } catch (error) {
+      console.error(`Error sending sync batch to ${peerId}:`, error);
+      this.activeSyncBatches.delete(peerId);
+    }
   }
 
   /**
@@ -218,7 +315,18 @@ class BulletNetwork extends EventEmitter {
    */
   _handleSyncData(peerId, message) {
     const updates = message.updates || [];
+    const requestId = message.requestId || "unknown";
+    const batchIndex = message.batchIndex || 0;
+    const totalBatches = message.totalBatches || 1;
+    const isComplete = message.complete || false;
 
+    console.log(
+      `Received sync batch ${
+        batchIndex + 1
+      }/${totalBatches} from ${peerId} with ${updates.length} updates`
+    );
+
+    // Process each update in the batch
     updates.forEach((update) => {
       const currentData = this.bullet._getData(update.path);
       const currentMeta = this.bullet.meta[update.path] || { timestamp: 0 };
@@ -233,7 +341,82 @@ class BulletNetwork extends EventEmitter {
       }
     });
 
+    // Update last sync timestamp for this peer
     this.lastSync[peerId] = message.timestamp;
+
+    // Send acknowledgment for this batch
+    const socket = this.connections.get(peerId);
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(
+        JSON.stringify({
+          id: this._generateId(),
+          type: "sync-ack",
+          requestId: requestId,
+          batchIndex: batchIndex,
+          totalBatches: totalBatches,
+          status: "processed",
+          timestamp: Date.now(),
+        })
+      );
+    }
+
+    // If this was the last batch, log completion
+    if (isComplete) {
+      console.log(
+        `Completed receiving sync from ${peerId}: ${totalBatches} batches`
+      );
+    }
+  }
+
+  /**
+   * Handle sync acknowledgment from a peer
+   * @param {string} peerId - Unique identifier for the peer
+   * @param {Object} message - Message object
+   * @private
+   */
+  _handleSyncAck(peerId, message) {
+    const requestId = message.requestId;
+    const batchIndex = message.batchIndex;
+    const status = message.status;
+
+    // Check if we have an active sync session for this peer
+    if (!this.activeSyncBatches.has(peerId)) {
+      console.log(
+        `Received sync-ack from ${peerId} but no active sync session found`
+      );
+      return;
+    }
+
+    const batchInfo = this.activeSyncBatches.get(peerId);
+
+    // Verify this ack is for the correct sync session and batch
+    if (
+      batchInfo.requestId !== requestId ||
+      batchInfo.currentBatch - 1 !== batchIndex
+    ) {
+      console.log(`Received out-of-sequence sync-ack from ${peerId}`);
+      return;
+    }
+
+    console.log(
+      `Received sync-ack for batch ${batchIndex + 1}/${
+        batchInfo.totalBatches
+      } from ${peerId}`
+    );
+
+    // Check if there are more batches to send
+    if (batchInfo.currentBatch < batchInfo.totalBatches) {
+      // Schedule sending the next batch
+      setTimeout(() => {
+        this._sendNextSyncBatch(peerId);
+      }, this.options.batchDelay);
+    } else {
+      // All batches have been sent and acknowledged
+      console.log(`Completed sync session with ${peerId}`);
+
+      // Clean up session state
+      this.activeSyncBatches.delete(peerId);
+    }
   }
 
   /**
