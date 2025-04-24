@@ -4,6 +4,7 @@ const BulletQuery = require("./bullet-query");
 const BulletValidation = require("./bullet-validation");
 const BulletMiddleware = require("./bullet-middleware");
 const BulletSerializer = require("./bullet-serializer");
+const BulletHam = require("./bullet-ham");
 
 let BulletLevelDBStorage = null;
 try {
@@ -33,17 +34,11 @@ class Bullet {
       enableStorageLog: false,
       ...options,
     };
-
     this.store = {};
-
     this.listeners = {};
-
     this.log = [];
-
     this.meta = {};
-
     this.BulletNode = BulletNode;
-
     this.id = this._generateId();
 
     console.log(`Bullet instance initialized with ID: ${this.id}`);
@@ -98,6 +93,10 @@ class Bullet {
     if (BulletNetwork && !this.options.disableNetwork) {
       this.network = new BulletNetwork(this, this.options);
     }
+
+    if (BulletHam && !this.options.disableHam) {
+      this.ham = new BulletHam(this);
+    }
   }
 
   /**
@@ -131,53 +130,93 @@ class Bullet {
   }
 
   /**
-   * Internal method to set data at path
+   * Internal method to set data at a given path with HAM conflict resolution
+   *
    * @param {string} path - Path to set data at
-   * @param {*} data - Data to set
-   * @param {number} timestamp - Operation timestamp
-   * @param {boolean} broadcast - Whether to broadcast the change to peers
+   * @param {*} rawData - Data to set (may include __fromNetwork flag)
+   * @param {boolean} [broadcast=true] - Whether to broadcast the change
+   * @returns {*} - The resolved value after HAM
    */
-  _setData(path, data, timestamp = Date.now(), broadcast = true) {
-    const parts = path.split("/").filter(Boolean);
-    let current = this.store;
+  setData(path, rawData, broadcast = true) {
+    const { data, fromNetwork } = this._stripNetworkFlag(rawData);
+    const { doUpdate, value, vectorClock, broadcastData } =
+      this.ham.handleUpdate(path, data, timestamp, fromNetwork);
 
-    for (let i = 0; i < parts.length - 1; i++) {
-      const part = parts[i];
-      if (!current[part]) {
-        current[part] = {};
-      }
-      current = current[part];
+    if (!doUpdate) {
+      return value;
     }
 
-    const lastPart = parts[parts.length - 1];
-    if (lastPart) {
-      const isNew = !this.meta[path] || timestamp > this.meta[path].timestamp;
+    this._applyUpdate(path, value, timestamp, vectorClock, fromNetwork);
 
-      if (isNew) {
-        current[lastPart] = data;
+    if (broadcast && this.network) {
+      this.network.broadcast(path, broadcastData, timestamp);
+    }
 
-        this.meta[path] = {
-          timestamp,
-          source: "local",
-        };
+    return value;
+  }
 
-        this.log.push({
-          op: "set",
-          path,
-          data,
-          timestamp,
-        });
+  /**
+   * Remove __fromNetwork flag and detect origin
+   * @private
+   */
+  _stripNetworkFlag(input) {
+    let fromNetwork = false;
+    let data = input;
 
-        if (this.log.length > 1000) {
-          this.log = this.log.slice(-1000);
-        }
-
-        this._notify(path, data);
-
-        if (broadcast && this.network) {
-          this.network.broadcast(path, data, timestamp);
-        }
+    if (input && typeof input === "object" && input.__fromNetwork) {
+      fromNetwork = true;
+      if (Array.isArray(input)) {
+        // clone array without flag
+        data = input.filter((_, idx) => idx !== "__fromNetwork");
+      } else {
+        // shallow clone minus __fromNetwork
+        const { __fromNetwork, ...rest } = input;
+        data = rest;
       }
+    }
+
+    return { data, fromNetwork };
+  }
+
+  /**
+   * Ensure nested path exists, update store, meta, log, and notify
+   * @private
+   */
+  _applyUpdate(path, value, timestamp, vectorClock, fromNetwork) {
+    const parts = path.split("/").filter(Boolean);
+    let node = this.store;
+
+    parts.slice(0, -1).forEach((part) => {
+      if (!node[part]) node[part] = {};
+      node = node[part];
+    });
+
+    const key = parts[parts.length - 1];
+    if (key) {
+      node[key] = value;
+
+      // metadata
+      this.meta[path] = {
+        ...(this.meta[path] || {}),
+        timestamp,
+        source: fromNetwork ? "network" : "local",
+        vectorClock,
+      };
+
+      // log
+      this.log.push({
+        op: "set",
+        path,
+        data: value,
+        timestamp,
+        vectorClock,
+      });
+      if (this.log.length > 1000) {
+        this.log.splice(0, this.log.length - 1000);
+      }
+
+      // notify subscribers
+      this._notify(path, value);
     }
   }
 
@@ -533,7 +572,7 @@ class Bullet {
       );
       try {
         const data = JSON.parse(json);
-        this._setData(targetPath, data);
+        this.setData(targetPath, data);
         return { success: true, path: targetPath, data };
       } catch (error) {
         return { success: false, error: error.message };
@@ -658,7 +697,7 @@ class BulletNode {
    * @return {BulletNode} - This node for chaining
    */
   put(data) {
-    this.bullet._setData(this.path, data);
+    this.bullet.setData(this.path, data);
     return this;
   }
 
@@ -713,7 +752,7 @@ class BulletNode {
    * @return {BulletNode} - This node for chaining
    */
   remove() {
-    this.bullet._setData(this.path, null);
+    this.bullet.setData(this.path, null);
     return this;
   }
 }

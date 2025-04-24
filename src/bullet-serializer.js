@@ -165,7 +165,7 @@ class BulletSerializer {
         throw new Error("No target path specified");
       }
 
-      this.bullet._setData(path, parsed.data);
+      this.bullet.setData(path, parsed.data);
 
       if (
         parsed.metadata &&
@@ -325,7 +325,7 @@ class BulletSerializer {
         result[id] = obj;
       }
 
-      this.bullet._setData(targetPath, result);
+      this.bullet.setData(targetPath, result);
 
       return {
         success: true,
@@ -557,7 +557,7 @@ class BulletSerializer {
         );
       }
 
-      this.bullet._setData(targetPath, parsed);
+      this.bullet.setData(targetPath, parsed);
 
       return {
         success: true,

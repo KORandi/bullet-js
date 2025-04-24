@@ -22,7 +22,7 @@ class BulletMiddleware {
    */
   _setupHooks() {
     const originalGetData = this.bullet._getData.bind(this.bullet);
-    const originalSetData = this.bullet._setData.bind(this.bullet);
+    const originalSetData = this.bullet.setData.bind(this.bullet);
 
     this.bullet._getData = (path) => {
       let modifiedPath = path;
@@ -67,12 +67,7 @@ class BulletMiddleware {
       return data;
     };
 
-    this.bullet._setData = (
-      path,
-      data,
-      timestamp = Date.now(),
-      broadcast = true
-    ) => {
+    this.bullet.setData = (path, data, broadcast = true) => {
       let modifiedPath = path;
       let modifiedData = data;
       let shouldContinue = true;
@@ -167,7 +162,7 @@ class BulletMiddleware {
         if (shouldContinue) {
           const oldData = this.bullet._getData(path);
 
-          this.bullet._setData(path, null);
+          this.bullet.setData(path, null);
 
           for (const middleware of this.bullet.middleware.middleware
             .afterDelete) {

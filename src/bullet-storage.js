@@ -43,15 +43,10 @@ class BulletStorage {
   _initPersistence() {
     this._loadData();
 
-    const originalSetData = this.bullet._setData.bind(this.bullet);
+    const originalSetData = this.bullet.setData.bind(this.bullet);
 
-    this.bullet._setData = (
-      path,
-      data,
-      timestamp = Date.now(),
-      broadcast = true
-    ) => {
-      originalSetData(path, data, timestamp, broadcast);
+    this.bullet.setData = (path, data, broadcast = true) => {
+      originalSetData(path, data, broadcast);
 
       if (this.options.enableStorageLog) {
         this.historyLog.append(path, data, timestamp).catch((err) => {

@@ -14,15 +14,10 @@ class BulletQuery {
    * @private
    */
   _initIndexing() {
-    const originalSetData = this.bullet._setData.bind(this.bullet);
+    const originalSetData = this.bullet.setData.bind(this.bullet);
 
-    this.bullet._setData = (
-      path,
-      data,
-      timestamp = Date.now(),
-      broadcast = true
-    ) => {
-      originalSetData(path, data, timestamp, broadcast);
+    this.bullet.setData = (path, data, broadcast = true) => {
+      originalSetData(path, data, broadcast);
 
       this._updateIndices(path, data);
     };

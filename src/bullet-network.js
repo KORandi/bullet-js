@@ -459,7 +459,7 @@ class BulletNetwork extends EventEmitter {
       const currentMeta = this.bullet.meta[update.path] || { timestamp: 0 };
 
       if (update.timestamp > currentMeta.timestamp) {
-        this.bullet._setData(update.path, update.data, update.timestamp, false);
+        this.bullet.setData(update.path, update.data, false);
 
         this.bullet.meta[update.path] = {
           timestamp: update.timestamp,
@@ -551,7 +551,7 @@ class BulletNetwork extends EventEmitter {
     const currentMeta = this.bullet.meta[path] || { timestamp: 0 };
 
     if (timestamp > currentMeta.timestamp) {
-      this.bullet._setData(path, data, timestamp, false);
+      this.bullet.setData(path, data, false);
 
       this.bullet.meta[path] = {
         timestamp,

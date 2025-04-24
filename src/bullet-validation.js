@@ -23,19 +23,14 @@ class BulletValidation {
    * @private
    */
   _initValidation() {
-    const originalSetData = this.bullet._setData.bind(this.bullet);
+    const originalSetData = this.bullet.setData.bind(this.bullet);
 
-    this.bullet._setData = (
-      path,
-      data,
-      timestamp = Date.now(),
-      broadcast = true
-    ) => {
+    this.bullet._setData = (path, data, broadcast = true) => {
       try {
         const isValid = this._validateDataForPath(path, data);
 
         if (isValid) {
-          originalSetData(path, data, timestamp, broadcast);
+          originalSetData(path, data, broadcast);
         } else {
           console.error(`Validation failed for path: ${path}`);
         }
@@ -43,7 +38,7 @@ class BulletValidation {
         this._handleError(error);
 
         if (!error.isFatal) {
-          originalSetData(path, data, timestamp, broadcast);
+          originalSetData(path, data, broadcast);
         }
       }
     };
