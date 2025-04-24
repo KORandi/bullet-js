@@ -567,11 +567,7 @@ class BulletNetwork extends EventEmitter {
   _startSyncCycle() {
     this.syncInterval = setInterval(() => {
       this.peers.forEach((_, peerId) => {
-        const now = Date.now();
-
-        if (now - lastSync > this.options.syncInterval / 2) {
-          this._sendSyncRequest(peerId);
-        }
+        this._sendSyncRequest(peerId);
       });
     }, this.options.syncInterval);
   }

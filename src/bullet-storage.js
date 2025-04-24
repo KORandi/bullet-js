@@ -254,6 +254,15 @@ class BulletStorage {
   }
 
   /**
+   * Manual trigger to save state
+   * @return {Promise} - Promise that resolves when save is complete
+   * @public
+   */
+  async save() {
+    this._saveData();
+  }
+
+  /**
    * Close storage and clean up
    * @public
    */
