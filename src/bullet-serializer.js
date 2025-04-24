@@ -124,7 +124,6 @@ class BulletSerializer {
       data,
       metadata,
       path,
-      timestamp: Date.now(),
       format: "bullet-json",
       version: "1.0",
     };

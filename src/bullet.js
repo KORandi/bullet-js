@@ -140,16 +140,16 @@ class Bullet {
   setData(path, rawData, broadcast = true) {
     const { data, fromNetwork } = this._stripNetworkFlag(rawData);
     const { doUpdate, value, vectorClock, broadcastData } =
-      this.ham.handleUpdate(path, data, timestamp, fromNetwork);
+      this.ham.handleUpdate(path, data, fromNetwork);
 
     if (!doUpdate) {
       return value;
     }
 
-    this._applyUpdate(path, value, timestamp, vectorClock, fromNetwork);
+    this._applyUpdate(path, value, vectorClock, fromNetwork);
 
     if (broadcast && this.network) {
-      this.network.broadcast(path, broadcastData, timestamp);
+      this.network.broadcast(path, broadcastData);
     }
 
     return value;
@@ -182,7 +182,7 @@ class Bullet {
    * Ensure nested path exists, update store, meta, log, and notify
    * @private
    */
-  _applyUpdate(path, value, timestamp, vectorClock, fromNetwork) {
+  _applyUpdate(path, value, vectorClock, fromNetwork) {
     const parts = path.split("/").filter(Boolean);
     let node = this.store;
 
@@ -198,7 +198,6 @@ class Bullet {
       // metadata
       this.meta[path] = {
         ...(this.meta[path] || {}),
-        timestamp,
         source: fromNetwork ? "network" : "local",
         vectorClock,
       };
@@ -208,7 +207,6 @@ class Bullet {
         op: "set",
         path,
         data: value,
-        timestamp,
         vectorClock,
       });
       if (this.log.length > 1000) {

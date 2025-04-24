@@ -74,7 +74,7 @@ class BulletMiddleware {
 
       for (const middleware of this.middleware.put) {
         try {
-          const result = middleware(modifiedPath, modifiedData, timestamp);
+          const result = middleware(modifiedPath, modifiedData);
 
           if (result === false) {
             shouldContinue = false;
@@ -107,11 +107,11 @@ class BulletMiddleware {
       if (shouldContinue) {
         const oldData = originalGetData(modifiedPath);
 
-        originalSetData(modifiedPath, modifiedData, timestamp, broadcast);
+        originalSetData(modifiedPath, modifiedData, broadcast);
 
         for (const middleware of this.middleware.afterPut) {
           try {
-            middleware(modifiedPath, modifiedData, oldData, timestamp);
+            middleware(modifiedPath, modifiedData, oldData);
           } catch (error) {
             console.error(`Error in 'afterPut' middleware:`, error);
             this._emitEvent("error", {
@@ -128,7 +128,6 @@ class BulletMiddleware {
           path: modifiedPath,
           data: modifiedData,
           oldData,
-          timestamp,
         });
       }
 
@@ -231,7 +230,7 @@ class BulletMiddleware {
 
   /**
    * Add middleware for put operations
-   * @param {Function} middleware - Middleware function(path, data, timestamp)
+   * @param {Function} middleware - Middleware function(path, data)
    * @return {BulletMiddleware} - This instance for chaining
    * @public
    */
@@ -241,7 +240,7 @@ class BulletMiddleware {
 
   /**
    * Add middleware for after put operations
-   * @param {Function} middleware - Middleware function(path, newData, oldData, timestamp)
+   * @param {Function} middleware - Middleware function(path, newData, oldData)
    * @return {BulletMiddleware} - This instance for chaining
    * @public
    */

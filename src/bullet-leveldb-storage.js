@@ -224,8 +224,6 @@ class BulletLevelDBStorage {
         }
       }
 
-      logEntries.sort((a, b) => a.timestamp - b.timestamp);
-
       this.bullet.log = [...this.bullet.log, ...logEntries];
 
       if (this.bullet.log.length > this.options.logLimit) {
@@ -427,10 +425,7 @@ class BulletLevelDBStorage {
     }
 
     for (const path in this.bullet.meta) {
-      if (
-        !this.persisted.meta[path] ||
-        this.bullet.meta[path].timestamp !== this.persisted.meta[path].timestamp
-      ) {
+      if (!this.persisted.meta[path]) {
         return true;
       }
     }

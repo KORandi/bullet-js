@@ -276,7 +276,6 @@ class BulletHAM {
    *
    * @param {string} path - Data path
    * @param {*} incomingData - Incoming data
-   * @param {number} timestamp - Operation timestamp
    * @param {boolean} isFromNetwork - Whether the update is from network
    * @returns {Object} Result with value, vector clock, and metadata
    */

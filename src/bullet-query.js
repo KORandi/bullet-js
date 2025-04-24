@@ -1,11 +1,8 @@
 class BulletQuery {
   constructor(bullet) {
     this.bullet = bullet;
-
     this.indices = {};
-
     this.indexedPaths = new Set();
-
     this._initIndexing();
   }
 
