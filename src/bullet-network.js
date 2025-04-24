@@ -11,9 +11,6 @@ class BulletNetwork extends EventEmitter {
       peers: [],
       maxTTL: 32,
       messageCacheSize: 10000,
-      syncInterval: 30000,
-      batchSize: 100,
-      batchDelay: 13,
       ...options,
     };
 
@@ -21,14 +18,12 @@ class BulletNetwork extends EventEmitter {
     this.peers = new Map();
     this.server = null;
     this.processedMessages = new Set();
-    this.activeSyncBatches = new Map();
 
     if (this.options.server !== false) {
       this._startListening();
     }
 
     this._connectToPeers();
-    this._startSyncCycle();
   }
 
   /**
@@ -171,8 +166,6 @@ class BulletNetwork extends EventEmitter {
               socket.removeListener("message", handleHandshake);
 
               this._setupPeerConnection(socket, remotePeerId, true, peerUrl);
-
-              this._sendInitSyncRequest(remotePeerId);
             }
           } catch (err) {
             console.error("Error handling handshake:", err);
@@ -231,8 +224,6 @@ class BulletNetwork extends EventEmitter {
 
       this.peers.delete(peerId);
 
-      this.activeSyncBatches.delete(peerId);
-
       if (outbound && peerUrl && this.options.peers.includes(peerUrl)) {
         console.log(`Will attempt to reconnect to ${peerUrl} in 5 seconds`);
         setTimeout(() => {
@@ -289,228 +280,12 @@ class BulletNetwork extends EventEmitter {
       case "handshake-response":
         break;
 
-      case "sync-request":
-        this._handleSyncRequest(peerId, message);
-        break;
-
-      case "sync-request-full":
-        this._handleSyncRequest(peerId, message, true);
-        break;
-
-      case "sync-data":
-        this._handleSyncData(peerId, message);
-        break;
-
-      case "sync-ack":
-        this._handleSyncAck(peerId, message);
-        break;
-
       case "put":
         this._handlePut(peerId, message);
         break;
 
       default:
         console.warn(`Unknown message type from ${peerId}:`, message.type);
-    }
-  }
-
-  /**
-   * Handle sync request from a peer
-   * @param {string} peerId - Remote peer ID
-   * @param {Object} message - Message object
-   * @private
-   */
-  async _handleSyncRequest(peerId, message) {
-    const peer = this.peers.get(peerId);
-    if (!peer || !peer.socket || peer.socket.readyState !== WebSocket.OPEN) {
-      return;
-    }
-
-    const requestId = message.requestId || this._generateId();
-    const lastSync = message.lastSync || {};
-
-    if (this.activeSyncBatches.has(peerId)) {
-      peer.socket.send(
-        JSON.stringify({
-          id: this._generateId(),
-          type: "sync-status",
-          requestId: requestId,
-          status: "in-progress",
-          message: "Sync already in progress",
-        })
-      );
-      return;
-    }
-
-    const allUpdates = await this._getUpdatesSince(lastSync);
-
-    if (allUpdates.length === 0) {
-      peer.socket.send(
-        JSON.stringify({
-          id: this._generateId(),
-          type: "sync-data",
-          requestId: requestId,
-          updates: [],
-          complete: true,
-          batchIndex: 0,
-          totalBatches: 0,
-        })
-      );
-      return;
-    }
-
-    const totalBatches = Math.ceil(allUpdates.length / this.options.batchSize);
-
-    this.activeSyncBatches.set(peerId, {
-      updates: allUpdates,
-      requestId: requestId,
-      totalBatches: totalBatches,
-      currentBatch: 0,
-      startTime: Date.now(),
-    });
-
-    this._sendNextSyncBatch(peerId);
-  }
-
-  /**
-   * Send the next batch of sync data to a peer
-   * @param {string} peerId - Remote peer ID
-   * @private
-   */
-  _sendNextSyncBatch(peerId) {
-    const peer = this.peers.get(peerId);
-    if (!peer || !peer.socket || peer.socket.readyState !== WebSocket.OPEN) {
-      this.activeSyncBatches.delete(peerId);
-      return;
-    }
-
-    const batchInfo = this.activeSyncBatches.get(peerId);
-    if (!batchInfo) return;
-
-    const { updates, requestId, totalBatches, currentBatch } = batchInfo;
-
-    const start = currentBatch * this.options.batchSize;
-    const end = Math.min(start + this.options.batchSize, updates.length);
-    const batchUpdates = updates.slice(start, end);
-    const isLastBatch = currentBatch === totalBatches - 1;
-
-    try {
-      peer.socket.send(
-        JSON.stringify({
-          id: this._generateId(),
-          type: "sync-data",
-          requestId: requestId,
-          updates: batchUpdates,
-          batchIndex: currentBatch,
-          totalBatches: totalBatches,
-          complete: isLastBatch,
-        })
-      );
-
-      console.log(
-        `Sent sync batch ${
-          currentBatch + 1
-        }/${totalBatches} to ${peerId} with ${batchUpdates.length} updates`
-      );
-
-      batchInfo.currentBatch++;
-
-      if (isLastBatch) {
-        this.activeSyncBatches.delete(peerId);
-        console.log(`Completed batched sync with ${peerId}`);
-      }
-    } catch (error) {
-      console.error(`Error sending sync batch to ${peerId}:`, error);
-      this.activeSyncBatches.delete(peerId);
-    }
-  }
-
-  /**
-   * Handle sync data from a peer
-   * @param {string} peerId - Remote peer ID
-   * @param {Object} message - Message object
-   * @private
-   */
-  _handleSyncData(peerId, message) {
-    const updates = message.updates || [];
-    const requestId = message.requestId || "unknown";
-    const batchIndex = message.batchIndex || 0;
-    const totalBatches = message.totalBatches || 1;
-    const isComplete = message.complete || false;
-
-    console.log(
-      `Received sync batch ${
-        batchIndex + 1
-      }/${totalBatches} from ${peerId} with ${updates.length} updates`
-    );
-
-    updates.forEach((update) => {
-      const networkData =
-        typeof update.data === "object" && update.data !== null
-          ? { ...update.data, __fromNetwork: true }
-          : update.data;
-
-      this.bullet.setData(update.path, networkData, false);
-    });
-
-    this._sendToPeer(peerId, {
-      id: this._generateId(),
-      type: "sync-ack",
-      requestId: requestId,
-      batchIndex: batchIndex,
-      totalBatches: totalBatches,
-      status: "processed",
-    });
-
-    if (isComplete) {
-      console.log(
-        `Completed receiving sync from ${peerId}: ${totalBatches} batches`
-      );
-    }
-  }
-
-  /**
-   * Handle sync acknowledgment from a peer
-   * @param {string} peerId - Remote peer ID
-   * @param {Object} message - Message object
-   * @private
-   */
-  _handleSyncAck(peerId, message) {
-    const requestId = message.requestId;
-    const batchIndex = message.batchIndex;
-    const status = message.status;
-
-    if (!this.activeSyncBatches.has(peerId)) {
-      console.log(
-        `Received sync-ack from ${peerId} but no active sync session found`
-      );
-      return;
-    }
-
-    const batchInfo = this.activeSyncBatches.get(peerId);
-
-    if (
-      batchInfo.requestId !== requestId ||
-      batchInfo.currentBatch - 1 !== batchIndex
-    ) {
-      console.log(`Received out-of-sequence sync-ack from ${peerId}`);
-      return;
-    }
-
-    console.log(
-      `Received sync-ack for batch ${batchIndex + 1}/${
-        batchInfo.totalBatches
-      } from ${peerId}`
-    );
-
-    if (batchInfo.currentBatch < batchInfo.totalBatches) {
-      setTimeout(() => {
-        this._sendNextSyncBatch(peerId);
-      }, this.options.batchDelay);
-    } else {
-      console.log(`Completed sync session with ${peerId}`);
-
-      this.activeSyncBatches.delete(peerId);
     }
   }
 
@@ -534,73 +309,6 @@ class BulletNetwork extends EventEmitter {
 
     this.bullet.setData(path, networkData, false);
     this._relayMessage(message, peerId);
-  }
-
-  async _getUpdatesSince(lastSyncVectors) {
-    const updates = [];
-
-    for (const entry of this.bullet.log) {
-      const path = entry.path;
-      const lastVector = lastSyncVectors[path];
-      const currentVector = entry.vectorClock;
-
-      if (!currentVector) continue;
-      if (
-        !lastVector ||
-        this.bullet.ham.compareVectorClocks(currentVector, lastVector) >= 0
-      ) {
-        updates.push({
-          path: path,
-          data: entry.data,
-          vectorClock: currentVector,
-        });
-      }
-    }
-
-    return updates;
-  }
-
-  /**
-   * Start the periodic sync cycle
-   * @private
-   */
-  _startSyncCycle() {
-    this.syncInterval = setInterval(() => {
-      this.peers.forEach((_, peerId) => {
-        this._sendSyncRequest(peerId);
-      });
-    }, this.options.syncInterval);
-  }
-
-  /**
-   * Send a sync request to a peer
-   * @param {string} peerId - Remote peer ID
-   * @private
-   */
-  _sendSyncRequest(peerId) {
-    const lastSyncVectors = {};
-
-    this.bullet.log.forEach((entry) => {
-      if (entry.vectorClock) {
-        lastSyncVectors[entry.path] = entry.vectorClock;
-      }
-    });
-
-    this._sendToPeer(peerId, {
-      id: this._generateId(),
-      type: "sync-request",
-      requestId: this._generateId(),
-      lastSync: lastSyncVectors,
-    });
-  }
-
-  _sendInitSyncRequest(peerId) {
-    this._sendToPeer(peerId, {
-      id: this._generateId(),
-      type: "sync-request-full",
-      requestId: this._generateId(),
-      lastSync: null,
-    });
   }
 
   /**
@@ -690,10 +398,6 @@ class BulletNetwork extends EventEmitter {
    * @public
    */
   close() {
-    if (this.syncInterval) {
-      clearInterval(this.syncInterval);
-    }
-
     this.peers.forEach((peer, peerId) => {
       try {
         if (peer.socket) {
@@ -713,7 +417,6 @@ class BulletNetwork extends EventEmitter {
     }
 
     this.peers.clear();
-    this.activeSyncBatches.clear();
     this.processedMessages.clear();
 
     console.log("BulletNetwork closed");

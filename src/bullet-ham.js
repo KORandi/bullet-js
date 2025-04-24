@@ -7,6 +7,7 @@ class BulletHAM {
     this.bullet = bullet;
     this.vectorClocks = new Map();
 
+    // Default comparison function
     this.compare = (incoming, existing) => {
       if (incoming === existing) return 0;
       if (incoming < existing) return -1;
@@ -113,6 +114,45 @@ class BulletHAM {
   }
 
   /**
+   * Deep merge two objects, resolving conflicts with the latest value
+   * @param {*} incomingValue - Incoming data value
+   * @param {*} currentValue - Current data value
+   * @returns {*} Merged value
+   */
+  mergeValues(incomingValue, currentValue) {
+    // If values aren't both objects, or one is null, or they're arrays - use incoming
+    if (
+      typeof incomingValue !== "object" ||
+      typeof currentValue !== "object" ||
+      incomingValue === null ||
+      currentValue === null ||
+      Array.isArray(incomingValue) ||
+      Array.isArray(currentValue)
+    ) {
+      // Use the compare function to determine which value wins
+      return this.compare(incomingValue, currentValue) >= 0
+        ? incomingValue
+        : currentValue;
+    }
+
+    // Deep merge objects
+    const result = { ...currentValue };
+
+    // Add or update properties from incoming object
+    for (const [key, value] of Object.entries(incomingValue)) {
+      if (key in result) {
+        // Recursively merge nested objects
+        result[key] = this.mergeValues(value, result[key]);
+      } else {
+        // Add new properties
+        result[key] = value;
+      }
+    }
+
+    return result;
+  }
+
+  /**
    * Resolve conflicts for a key using vector clocks
    * @param {string} key - Key that identifies the data
    * @param {Object} incomingVectorClock - Vector clock of incoming data
@@ -128,6 +168,7 @@ class BulletHAM {
     incomingValue,
     currentValue
   ) {
+    // No current state, accept incoming
     if (!currentVectorClock) {
       const clock = this.incrementVectorClock(key);
       return {
@@ -155,12 +196,14 @@ class BulletHAM {
 
     this.vectorClocks.set(key, mergedClock);
 
+    // Identical clocks, compare values
     if (
       comparison === 0 &&
       JSON.stringify(incomingVectorClock) === JSON.stringify(currentVectorClock)
     ) {
       const valueComparison = this.compare(incomingValue, currentValue);
 
+      // Identical values
       if (valueComparison === 0) {
         return {
           defer: false,
@@ -175,6 +218,7 @@ class BulletHAM {
         };
       }
 
+      // Different values but identical clocks, use value comparison
       return {
         defer: false,
         historical: false,
@@ -188,6 +232,7 @@ class BulletHAM {
       };
     }
 
+    // Incoming clock dominates
     if (comparison > 0) {
       return {
         defer: false,
@@ -202,6 +247,7 @@ class BulletHAM {
       };
     }
 
+    // Current clock dominates
     if (comparison < 0) {
       return {
         defer: false,
@@ -216,18 +262,19 @@ class BulletHAM {
       };
     }
 
-    const valueComparison = this.compare(incomingValue, currentValue);
+    // Concurrent modifications - merge the objects
+    const mergedValue = this.mergeValues(incomingValue, currentValue);
 
     return {
       defer: false,
       historical: false,
       converge: true,
-      incoming: valueComparison > 0,
-      current: valueComparison < 0,
+      incoming: false,
+      current: false,
       concurrent: true,
       vectorClock: mergedClock,
-      reason: "concurrent modifications, resolved by value comparison",
-      value: valueComparison >= 0 ? incomingValue : currentValue,
+      reason: "concurrent modifications, merged objects",
+      value: mergedValue,
     };
   }
 
@@ -333,7 +380,7 @@ class BulletHAM {
       vectorClock: result.vectorClock, // Vector clock to store in metadata
       broadcastData: broadcastData, // Data to broadcast (with vector clock)
       decision: result, // Full decision for logging/debugging
-      doUpdate: result.incoming || !currentClock, // Whether to update or not
+      doUpdate: result.incoming || !currentClock || result.concurrent, // Whether to update or not
     };
   }
 
