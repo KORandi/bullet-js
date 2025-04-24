@@ -1,5 +1,6 @@
 const EventEmitter = require("events");
 const WebSocket = require("ws");
+const BulletNetworkSync = require("./bullet-network-sync.js");
 
 class BulletNetwork extends EventEmitter {
   constructor(bullet, options = {}) {
@@ -11,6 +12,7 @@ class BulletNetwork extends EventEmitter {
       peers: [],
       maxTTL: 32,
       messageCacheSize: 10000,
+      enableSync: true,
       ...options,
     };
 
@@ -18,6 +20,11 @@ class BulletNetwork extends EventEmitter {
     this.peers = new Map();
     this.server = null;
     this.processedMessages = new Set();
+
+    // Initialize sync manager if enabled
+    if (this.options.enableSync) {
+      this.sync = new BulletNetworkSync(bullet, this, options);
+    }
 
     if (this.options.server !== false) {
       this._startListening();
@@ -275,6 +282,9 @@ class BulletNetwork extends EventEmitter {
       }
     }
 
+    // Emit message event for the sync manager to handle sync-related messages
+    this.emit("message", peerId, message);
+
     switch (message.type) {
       case "handshake":
       case "handshake-response":
@@ -284,8 +294,13 @@ class BulletNetwork extends EventEmitter {
         this._handlePut(peerId, message);
         break;
 
+      // We don't need to handle sync messages directly here
+      // They're processed by the BulletNetworkSync class through the "message" event
+
       default:
-        console.warn(`Unknown message type from ${peerId}:`, message.type);
+        if (!message.type.startsWith("sync-")) {
+          console.warn(`Unknown message type from ${peerId}:`, message.type);
+        }
     }
   }
 
@@ -315,9 +330,10 @@ class BulletNetwork extends EventEmitter {
    * Send a message to a specific peer
    * @param {string} peerId - Remote peer ID
    * @param {Object} message - Message to send
-   * @private
+   * @return {boolean} - Whether the message was sent successfully
+   * @public
    */
-  _sendToPeer(peerId, message) {
+  sendToPeer(peerId, message) {
     const peer = this.peers.get(peerId);
 
     if (!peer || !peer.socket || peer.socket.readyState !== WebSocket.OPEN) {
@@ -355,7 +371,7 @@ class BulletNetwork extends EventEmitter {
 
     this.peers.forEach((_, peerId) => {
       if (peerId !== sourcePeerId) {
-        this._sendToPeer(peerId, relayMessage);
+        this.sendToPeer(peerId, relayMessage);
       }
     });
   }
@@ -378,7 +394,7 @@ class BulletNetwork extends EventEmitter {
     this.processedMessages.add(message.id);
 
     this.peers.forEach((_, peerId) => {
-      this._sendToPeer(peerId, message);
+      this.sendToPeer(peerId, message);
     });
   }
 
@@ -394,10 +410,49 @@ class BulletNetwork extends EventEmitter {
   }
 
   /**
+   * Request an explicit sync with a specific peer
+   * @param {string} peerId - ID of the peer to sync with (or null for all peers)
+   * @param {Object} options - Sync options
+   * @public
+   */
+  requestSync(peerId = null, options = {}) {
+    if (!this.sync) {
+      console.warn("Sync is not enabled for this network");
+      return;
+    }
+
+    if (peerId) {
+      this.sync.requestSync(peerId, options);
+    } else {
+      // Sync with all connected peers
+      this.peers.forEach((_, id) => {
+        this.sync.requestSync(id, options);
+      });
+    }
+  }
+
+  /**
+   * Get sync statistics for monitoring
+   * @return {Object} - Sync statistics, or null if sync is not enabled
+   * @public
+   */
+  getSyncStats() {
+    if (!this.sync) {
+      return null;
+    }
+    return this.sync.getSyncStats();
+  }
+
+  /**
    * Close all connections and stop the server
    * @public
    */
   close() {
+    // Close the sync manager first if it exists
+    if (this.sync) {
+      this.sync.close();
+    }
+
     this.peers.forEach((peer, peerId) => {
       try {
         if (peer.socket) {

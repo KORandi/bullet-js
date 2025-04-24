@@ -14,7 +14,7 @@ const fs = require("fs");
 const path = require("path");
 
 // Configuration
-const NUM_NODES = 6;
+const NUM_NODES = 32;
 const BASE_PORT = 8000;
 const DATA_UPDATE_INTERVAL = 5000; // Update data every 5 seconds
 const LOG_DIR = path.join(__dirname, "../data/chain_logs");
@@ -68,7 +68,10 @@ function createPeerNode(nodeId, port, peerUrls, position) {
       storage: true,
       storagePath: './data/chain-node-${nodeId}',
       enableIndexing: true,
-      enableMiddleware: true
+      enableMiddleware: true,
+      syncOptions: {
+        syncInterval: 10_000,
+      }
     });
     
     // Node information for data path
