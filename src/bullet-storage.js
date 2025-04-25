@@ -1,138 +1,68 @@
-const fs = require("fs");
-const path = require("path");
-const crypto = require("crypto");
-
+/**
+ * BulletStorage - Abstract base storage class
+ * Defines the interface for storage providers in Bullet.js
+ */
 class BulletStorage {
+  /**
+   * Create a new storage instance
+   * @param {Object} bullet - The Bullet instance
+   * @param {Object} options - Storage options
+   */
   constructor(bullet, options = {}) {
     this.bullet = bullet;
     this.options = {
-      path: "./.bullet",
-      saveInterval: 5000,
-      encrypt: false,
-      encryptionKey: null,
       enableStorageLog: false,
       ...options,
     };
 
-    if (!fs.existsSync(this.options.path)) {
-      fs.mkdirSync(this.options.path, { recursive: true });
-    }
-
+    // Track persisted state for change detection
     this.persisted = {
       store: {},
       meta: {},
       log: [],
     };
 
-    this._initPersistence();
+    // Initialize the storage provider
+    this._initStorage();
   }
 
   /**
-   * Initialize persistence mechanisms
-   * @private
+   * Initialize the storage provider
+   * Must be implemented by subclasses
+   * @protected
    */
-  _initPersistence() {
+  _initStorage() {
     this._loadData();
-
-    const originalSetData = this.bullet.setData.bind(this.bullet);
-
-    this.bullet.setData = (path, data, broadcast = true) => {
-      originalSetData(path, data, broadcast);
-    };
-
-    this.saveInterval = setInterval(() => {
-      this._saveData();
-    }, this.options.saveInterval);
-
-    process.on("exit", () => {
-      this._saveData();
-    });
-
-    ["SIGINT", "SIGTERM", "SIGQUIT"].forEach((signal) => {
-      process.on(signal, () => {
-        this._saveData();
-      });
-    });
   }
 
   /**
-   * Load persisted data from disk
-   * @private
+   * Load data from storage
+   * Must be implemented by subclasses
+   * @protected
    */
   _loadData() {
-    try {
-      const storePath = path.join(this.options.path, "store.json");
-      if (fs.existsSync(storePath)) {
-        const storeData = fs.readFileSync(storePath);
-        const storeJson = this._decrypt(storeData);
-
-        this._deepMerge(this.bullet.store, JSON.parse(storeJson));
-        this.persisted.store = JSON.parse(JSON.stringify(this.bullet.store));
-      }
-
-      const metaPath = path.join(this.options.path, "meta.json");
-      if (fs.existsSync(metaPath)) {
-        const metaData = fs.readFileSync(metaPath);
-        const metaJson = this._decrypt(metaData);
-
-        Object.assign(this.bullet.meta, JSON.parse(metaJson));
-        this.persisted.meta = JSON.parse(JSON.stringify(this.bullet.meta));
-      }
-
-      const logPath = path.join(this.options.path, "log.json");
-      if (fs.existsSync(logPath)) {
-        const logData = fs.readFileSync(logPath);
-        const logJson = this._decrypt(logData);
-
-        this.bullet.log = [...this.bullet.log, ...JSON.parse(logJson)];
-
-        if (this.bullet.log.length > 1000) {
-          this.bullet.log = this.bullet.log.slice(-1000);
-        }
-
-        this.persisted.log = [...this.bullet.log];
-      }
-
-      console.log("Bullet: Data loaded from persistent storage");
-    } catch (err) {
-      console.error("Error loading persisted data:", err);
+    // Base implementation does nothing
+    // Subclasses should override this method
+    if (this.options.enableStorageLog) {
+      console.log("Bullet: Base storage initialized (no data loaded)");
     }
   }
 
   /**
-   * Save data to disk
-   * @private
+   * Save data to storage
+   * Must be implemented by subclasses
+   * @protected
    */
   _saveData() {
-    try {
-      if (this._hasChanges()) {
-        const storeJson = JSON.stringify(this.bullet.store);
-        const storeData = this._encrypt(storeJson);
-        fs.writeFileSync(path.join(this.options.path, "store.json"), storeData);
-
-        const metaJson = JSON.stringify(this.bullet.meta);
-        const metaData = this._encrypt(metaJson);
-        fs.writeFileSync(path.join(this.options.path, "meta.json"), metaData);
-
-        const logJson = JSON.stringify(this.bullet.log);
-        const logData = this._encrypt(logJson);
-        fs.writeFileSync(path.join(this.options.path, "log.json"), logData);
-
-        this.persisted.store = JSON.parse(JSON.stringify(this.bullet.store));
-        this.persisted.meta = JSON.parse(JSON.stringify(this.bullet.meta));
-        this.persisted.log = [...this.bullet.log];
-
-        console.log("Bullet: Data persisted to storage");
-      }
-    } catch (err) {
-      console.error("Error saving data:", err);
-    }
+    // Base implementation does nothing
+    // Subclasses should override this method
+    return Promise.resolve();
   }
 
   /**
    * Check if there are changes to persist
    * @return {boolean} - Whether there are changes
-   * @private
+   * @protected
    */
   _hasChanges() {
     if (this.bullet.log.length !== this.persisted.log.length) {
@@ -145,14 +75,76 @@ class BulletStorage {
       }
     }
 
-    return false;
+    return this._hasStoreChanges(this.bullet.store, this.persisted.store);
+  }
+
+  /**
+   * Recursively check for changes in store objects
+   * @param {Object} current - Current state
+   * @param {Object} persisted - Persisted state
+   * @return {boolean} - Whether there are changes
+   * @protected
+   */
+  _hasStoreChanges(current, persisted) {
+    // Quick reference equality check
+    if (current === persisted) {
+      return false;
+    }
+
+    // Check for type differences or null/undefined
+    if (
+      typeof current !== typeof persisted ||
+      current === null ||
+      persisted === null
+    ) {
+      return true;
+    }
+
+    // Handle arrays
+    if (Array.isArray(current)) {
+      if (!Array.isArray(persisted) || current.length !== persisted.length) {
+        return true;
+      }
+
+      // Check each element
+      for (let i = 0; i < current.length; i++) {
+        if (this._hasStoreChanges(current[i], persisted[i])) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    // Handle objects
+    if (typeof current === "object") {
+      const currentKeys = Object.keys(current);
+      const persistedKeys = Object.keys(persisted);
+
+      if (currentKeys.length !== persistedKeys.length) {
+        return true;
+      }
+
+      for (const key of currentKeys) {
+        if (
+          !persisted.hasOwnProperty(key) ||
+          this._hasStoreChanges(current[key], persisted[key])
+        ) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    // Simple value comparison for other types
+    return current !== persisted;
   }
 
   /**
    * Deep merge objects
    * @param {Object} target - Target object
    * @param {Object} source - Source object
-   * @private
+   * @return {Object} - Merged object
+   * @protected
    */
   _deepMerge(target, source) {
     for (const key in source) {
@@ -175,91 +167,12 @@ class BulletStorage {
   }
 
   /**
-   * Encrypt data if encryption is enabled
-   * @param {string} data - Data to encrypt
-   * @return {Buffer|string} - Encrypted data or original data
-   * @private
-   */
-  _encrypt(data) {
-    if (!this.options.encrypt) {
-      return data;
-    }
-
-    try {
-      const key = this._getEncryptionKey();
-      const iv = crypto.randomBytes(16);
-      const cipher = crypto.createCipheriv("aes-256-cbc", key, iv);
-
-      let encrypted = cipher.update(data, "utf8", "hex");
-      encrypted += cipher.final("hex");
-
-      return Buffer.from(iv.toString("hex") + encrypted);
-    } catch (err) {
-      console.error("Encryption failed:", err);
-      return data;
-    }
-  }
-
-  /**
-   * Decrypt data if encryption is enabled
-   * @param {Buffer|string} data - Data to decrypt
-   * @return {string} - Decrypted data or original data
-   * @private
-   */
-  _decrypt(data) {
-    if (!this.options.encrypt) {
-      return data.toString();
-    }
-
-    try {
-      const key = this._getEncryptionKey();
-
-      const dataStr = data.toString();
-      const iv = Buffer.from(dataStr.slice(0, 32), "hex");
-      const encryptedText = dataStr.slice(32);
-
-      const decipher = crypto.createDecipheriv("aes-256-cbc", key, iv);
-
-      let decrypted = decipher.update(encryptedText, "hex", "utf8");
-      decrypted += decipher.final("utf8");
-
-      return decrypted;
-    } catch (err) {
-      console.error("Decryption failed:", err);
-      return data.toString();
-    }
-  }
-
-  /**
-   * Get the encryption key or derive one from the provided key
-   * @return {Buffer} - 32-byte encryption key
-   * @private
-   */
-  _getEncryptionKey() {
-    if (!this.options.encryptionKey) {
-      throw new Error("Encryption key is required when encryption is enabled");
-    }
-
-    if (
-      Buffer.isBuffer(this.options.encryptionKey) &&
-      this.options.encryptionKey.length === 32
-    ) {
-      return this.options.encryptionKey;
-    }
-
-    return crypto
-      .createHash("sha256")
-      .update(String(this.options.encryptionKey))
-      .digest();
-  }
-
-  /**
    * Manual trigger to save state
    * @return {Promise} - Promise that resolves when save is complete
    * @public
    */
   async save() {
-    this._saveData();
+    return this._saveData();
   }
 
   /**
@@ -267,11 +180,7 @@ class BulletStorage {
    * @public
    */
   async close() {
-    if (this.saveInterval) {
-      clearInterval(this.saveInterval);
-    }
-
-    this._saveData();
+    await this._saveData();
   }
 }
 

@@ -1,5 +1,6 @@
 const BulletNetwork = require("./bullet-network");
 const BulletStorage = require("./bullet-storage");
+const BulletFileStorage = require("./bullet-file-storage");
 const BulletQuery = require("./bullet-query");
 const BulletValidation = require("./bullet-validation");
 const BulletMiddleware = require("./bullet-middleware");
@@ -14,6 +15,7 @@ class Bullet {
       storage: true,
       storageType: "file",
       storagePath: "./.bullet",
+      saveInterval: 5000,
       encrypt: false,
       encryptionKey: null,
       enableIndexing: true,
@@ -36,13 +38,9 @@ class Bullet {
       this.middleware = new BulletMiddleware(this);
     }
 
-    if (BulletStorage) {
-      this.storage = new BulletStorage(this, {
-        path: this.options.storagePath,
-        encrypt: this.options.encrypt,
-        encryptionKey: this.options.encryptionKey,
-        enableStorageLog: this.options.enableStorageLog,
-      });
+    // Initialize storage based on storage type
+    if (this.options.storage) {
+      this._initStorage();
     }
 
     if (BulletQuery && this.options.enableIndexing) {
@@ -63,6 +61,40 @@ class Bullet {
 
     if (BulletHam && !this.options.disableHam) {
       this.ham = new BulletHam(this);
+    }
+  }
+
+  /**
+   * Initialize storage based on storage type
+   * @private
+   */
+  _initStorage() {
+    const storageOptions = {
+      path: this.options.storagePath,
+      saveInterval: this.options.saveInterval,
+      encrypt: this.options.encrypt,
+      encryptionKey: this.options.encryptionKey,
+      enableStorageLog: this.options.enableStorageLog,
+    };
+
+    switch (this.options.storageType) {
+      case "file":
+        this.storage = new BulletFileStorage(this, storageOptions);
+        break;
+      case "memory":
+        this.storage = new BulletStorage(this, storageOptions);
+        break;
+      default:
+        if (typeof this.options.storageType === "function") {
+          // Custom storage provider constructor
+          const StorageProvider = this.options.storageType;
+          this.storage = new StorageProvider(this, storageOptions);
+        } else {
+          console.warn(
+            `Unknown storage type: ${this.options.storageType}. Defaulting to memory.`
+          );
+          this.storage = new BulletStorage(this, storageOptions);
+        }
     }
   }
 
@@ -167,6 +199,7 @@ class Bullet {
         ...(this.meta[path] || {}),
         source: fromNetwork ? "network" : "local",
         vectorClock,
+        lastModified: Date.now(),
       };
 
       // log
@@ -175,6 +208,7 @@ class Bullet {
         path,
         data: value,
         vectorClock,
+        timestamp: Date.now(),
       });
       if (this.log.length > 1000) {
         this.log.splice(0, this.log.length - 1000);
@@ -221,7 +255,9 @@ class Bullet {
       }
     }
 
-    if (this.storage) {
+    // Trigger an immediate save for manual storage providers or those without intervals
+    if (this.storage && this.options.storageType !== "file") {
+      // For non-file storage or when intervals are disabled, trigger manual save
       clearTimeout(this._saveTimeout);
       this._saveTimeout = setTimeout(() => {
         this.storage.save();
@@ -249,13 +285,13 @@ class Bullet {
    * Close the Bullet instance and clean up resources
    * @public
    */
-  close() {
+  async close() {
     if (this._saveTimeout) {
       clearTimeout(this._saveTimeout);
     }
 
     if (this.storage) {
-      this.storage.close();
+      await this.storage.close();
     }
 
     if (this.network) {
