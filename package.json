@@ -14,8 +14,7 @@
     "examples:serializer": "node examples/bullet-serializer-example.js",
     "examples:circle-network": "node examples/bullet-circle-network-example.js",
     "examples:bridge-network": "node examples/bullet-bridge-example.js",
-    "examples:chain-network": "node examples/bullet-chain-example.js",
-    "examples:leveldb": "node examples/bullet-leveldb-example.js"
+    "examples:chain-network": "node examples/bullet-chain-example.js"
   },
   "keywords": [
     "database",
@@ -29,7 +28,6 @@
   "license": "MIT",
   "dependencies": {
     "crypto": "^1.0.1",
-    "level": "^8.0.1",
     "ws": "^8.13.0"
   },
   "devDependencies": {

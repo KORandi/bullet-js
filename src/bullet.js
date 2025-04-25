@@ -6,16 +6,6 @@ const BulletMiddleware = require("./bullet-middleware");
 const BulletSerializer = require("./bullet-serializer");
 const BulletHam = require("./bullet-ham");
 
-let BulletLevelDBStorage = null;
-try {
-  require.resolve("level");
-  BulletLevelDBStorage = require("./bullet-leveldb-storage");
-} catch (err) {
-  console.log(
-    "LevelDB dependency not available. LevelDB storage will be disabled."
-  );
-}
-
 class Bullet {
   constructor(options = {}) {
     this.options = {
@@ -24,7 +14,6 @@ class Bullet {
       storage: true,
       storageType: "file",
       storagePath: "./.bullet",
-      leveldbPath: "./.bullet-leveldb",
       encrypt: false,
       encryptionKey: null,
       enableIndexing: true,
@@ -47,35 +36,13 @@ class Bullet {
       this.middleware = new BulletMiddleware(this);
     }
 
-    if (this.options.storage) {
-      if (this.options.storageType === "leveldb") {
-        if (BulletLevelDBStorage) {
-          this.storage = new BulletLevelDBStorage(this, {
-            path: this.options.leveldbPath || this.options.storagePath,
-            encrypt: this.options.encrypt,
-            encryptionKey: this.options.encryptionKey,
-          });
-        } else {
-          console.warn(
-            "LevelDB storage requested but module not available. Falling back to file storage."
-          );
-          if (BulletStorage) {
-            this.storage = new BulletStorage(this, {
-              path: this.options.storagePath,
-              encrypt: this.options.encrypt,
-              encryptionKey: this.options.encryptionKey,
-              enableStorageLog: this.options.enableStorageLog,
-            });
-          }
-        }
-      } else if (BulletStorage) {
-        this.storage = new BulletStorage(this, {
-          path: this.options.storagePath,
-          encrypt: this.options.encrypt,
-          encryptionKey: this.options.encryptionKey,
-          enableStorageLog: this.options.enableStorageLog,
-        });
-      }
+    if (BulletStorage) {
+      this.storage = new BulletStorage(this, {
+        path: this.options.storagePath,
+        encrypt: this.options.encrypt,
+        encryptionKey: this.options.encryptionKey,
+        enableStorageLog: this.options.enableStorageLog,
+      });
     }
 
     if (BulletQuery && this.options.enableIndexing) {

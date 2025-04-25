@@ -12,7 +12,6 @@ module.exports = Bullet;
 // Export individual components
 module.exports.Network = require("./src/bullet-network");
 module.exports.Storage = require("./src/bullet-storage");
-module.exports.LevelDBStorage = require("./src/bullet-leveldb-storage");
 module.exports.Query = require("./src/bullet-query");
 module.exports.Validation = require("./src/bullet-validation");
 module.exports.Middleware = require("./src/bullet-middleware");
