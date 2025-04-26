@@ -51,12 +51,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/bullet-js.git"
+    "url": "git+https://github.com/korandi/bullet-js.git"
   },
   "bugs": {
-    "url": "https://github.com/yourusername/bullet-js/issues"
+    "url": "https://github.com/korandi/bullet-js/issues"
   },
-  "homepage": "https://github.com/yourusername/bullet-js#readme",
+  "homepage": "https://github.com/korandi/bullet-js#readme",
   "files": [
     "index.js",
     "src/**/*.js",
