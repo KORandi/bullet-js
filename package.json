@@ -1,5 +1,5 @@
 {
-  "name": "bullet-js",
+  "name": "@korandi/bullet-js",
   "version": "0.1.0",
   "description": "A distributed graph database inspired by Gun.js",
   "main": "index.js",

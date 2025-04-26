@@ -1,21 +1,23 @@
 # Bullet.js
 
-A distributed graph database inspired by Gun.js, designed for simplicity, performance, and flexibility.
+A distributed, real-time graph database with peer-to-peer synchronization capabilities.
 
 ## Overview
 
-Bullet.js is a modular, real-time, distributed graph database that enables collaborative applications with offline capability. It provides a clean and intuitive API for storing, retrieving, and synchronizing data across peers, with built-in support for validation, querying, middleware, and more.
+Bullet.js is a lightweight yet powerful distributed database designed for building collaborative applications that work both online and offline. Heavily inspired by Gun.js, Bullet.js offers a clean, intuitive API with a focus on modularity, performance, and ease of use.
 
-## Key Features
+## Features
 
-- **Distributed Architecture**: Peer-to-peer synchronization with automatic conflict resolution
+- **Distributed Architecture**: Peer-to-peer data synchronization with automatic conflict resolution
+- **Real-time Collaboration**: Instant data updates across connected peers
+- **Offline-First**: Continue working without an internet connection
 - **Modular Design**: Use only the components you need
 - **Validation**: Schema-based data validation to ensure data integrity
-- **Query System**: Fast lookups with indexing and filter capabilities
-- **Middleware**: Customize behavior with middleware hooks
+- **Query System**: Index and filter data efficiently
+- **Middleware**: Customize behavior with hooks for reads and writes
 - **Serialization**: Import/export data in various formats (JSON, CSV, XML)
-- **Persistence**: Data storage with optional encryption
-- **Event System**: Subscribe to changes in real-time
+- **Persistence**: Optional storage with encryption support
+- **Conflict Resolution**: Built-in HAM (Hash-Array-Mapped) algorithm for conflict resolution
 
 ## Installation
 
@@ -23,14 +25,14 @@ Bullet.js is a modular, real-time, distributed graph database that enables colla
 npm install bullet-js
 ```
 
-## Basic Usage
+## Quick Start
 
 ```javascript
 const Bullet = require("bullet-js");
 
 // Initialize a Bullet instance
 const bullet = new Bullet({
-  peers: ["ws://peer1.example.com", "ws://peer2.example.com"],
+  peers: ["ws://peer-server.example.com"],
   storage: true,
   storagePath: "./data",
 });
@@ -42,9 +44,9 @@ bullet.get("users/alice").put({
   role: "admin",
 });
 
-// Retrieve data
+// Listen for updates
 bullet.get("users/alice").on((userData) => {
-  console.log("User data:", userData);
+  console.log("User data updated:", userData);
 });
 
 // Query data
@@ -53,80 +55,25 @@ console.log(
   "Admin users:",
   admins.map((node) => node.value().name)
 );
-
-// Use middleware
-bullet.beforePut((path, data) => {
-  console.log(`Data being written to ${path}:`, data);
-  return data;
-});
 ```
 
-## API Reference
-
-### Core API
-
-- `new Bullet(options)`: Create a new Bullet instance
-- `bullet.get(path)`: Access a node at the specified path
-- `bullet.close()`: Close connections and clean up resources
-
-### Node API
-
-- `node.put(data)`: Write data to the node
-- `node.value()`: Get the current value of the node
-- `node.on(callback)`: Subscribe to changes on the node
-- `node.off(callback)`: Unsubscribe from changes
-- `node.get(childPath)`: Access a child node
-- `node.delete()`: Delete the node
-
-### Query API
-
-- `bullet.index(path, field)`: Create an index for faster queries
-- `bullet.equals(path, field, value)`: Find nodes with a specific value
-- `bullet.range(path, field, min, max)`: Find nodes within a value range
-- `bullet.filter(path, filterFn)`: Apply a custom filter function
-- `bullet.find(path, predicateFn)`: Find the first matching node
-
-### Validation API
-
-- `bullet.defineSchema(name, schema)`: Define a data schema
-- `bullet.applySchema(path, schemaName)`: Apply a schema to a path
-- `bullet.validate(schemaName, data)`: Validate data against a schema
-- `bullet.onValidationError(type, handler)`: Register validation error handler
-
-### Middleware API
-
-- `bullet.use(operation, middleware)`: Register middleware for an operation
-- `bullet.beforePut(middleware)`: Register middleware before data writes
-- `bullet.afterPut(middleware)`: Register middleware after data writes
-- `bullet.onGet(middleware)`: Register middleware for data reads
-- `bullet.afterGet(middleware)`: Register middleware after data reads
-- `bullet.on(event, listener)`: Register event listener
-
-### Serialization API
-
-- `bullet.exportToJSON(path, options)`: Export data to JSON
-- `bullet.importFromJSON(json, targetPath, options)`: Import data from JSON
-- `bullet.exportToCSV(path, options)`: Export data to CSV
-- `bullet.importFromCSV(csv, targetPath, options)`: Import data from CSV
-- `bullet.exportToXML(path, options)`: Export data to XML
-- `bullet.importFromXML(xml, targetPath, options)`: Import data from XML
-
-## Configuration Options
+## Configuration
 
 ```javascript
 const bullet = new Bullet({
-  // Networking options
+  // Networking
   peers: [], // Array of peer WebSocket URLs
   server: true, // Whether to run a WebSocket server
   port: 8765, // WebSocket server port
 
-  // Storage options
+  // Storage
   storage: true, // Enable persistence
-  storagePath: "./.bullet", // Path for persistent storage
+  storageType: "file", // 'file', 'memory', or custom storage class
+  storagePath: "./.bullet", // Path for file storage
   encrypt: false, // Enable storage encryption
   encryptionKey: null, // Encryption key
 
-  // Feature toggles
+  // Features
   enableIndexing: true, // Enable query capabilities
   enableValidation: true, // Enable schema validation
   enableMiddleware: true, // Enable middleware system
@@ -134,28 +81,98 @@ const bullet = new Bullet({
 });
 ```
 
-## Examples
+## Core Concepts
 
-Check out the example scripts in the repository:
+### Graph Structure
 
-- `bullet-query-example.js`: Demonstrates query capabilities
-- `bullet-validation-example.js`: Shows schema validation
-- `bullet-middleware-example.js`: Illustrates middleware usage
-- `bullet-serializer-example.js`: Demonstrates data serialization
+Data in Bullet.js is organized as a graph, where each node can be accessed by a path.
 
-Run examples with:
+```javascript
+// Create nested data
+bullet.get("users/bob/profile").put({
+  age: 28,
+  location: "New York",
+});
 
-```bash
-npm run examples:query
-npm run examples:validation
-npm run examples:middleware
-npm run examples:serializer
+// Access nested data
+bullet.get("users/bob/profile/age").value(); // 28
 ```
 
-## Contributing
+### Real-time Subscriptions
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Subscribe to changes at any node in the graph.
+
+```javascript
+bullet.get("users").on((users) => {
+  console.log("Users updated:", users);
+});
+```
+
+### Validation
+
+Define schemas to validate data before saving.
+
+```javascript
+bullet.defineSchema("user", {
+  type: "object",
+  required: ["username", "email"],
+  properties: {
+    username: { type: "string", min: 3, max: 20 },
+    email: { type: "string", format: "email" },
+    age: { type: "integer", min: 13 },
+  },
+});
+
+bullet.applySchema("users", "user");
+```
+
+### Querying
+
+Create indices for faster queries and filter data.
+
+```javascript
+bullet.index("users", "age");
+bullet.range("users", "age", 20, 30);
+bullet.filter("users", (user) => user.active === true);
+```
+
+### Middleware
+
+Customize behavior with middleware hooks.
+
+```javascript
+bullet.beforePut((path, data) => {
+  // Add timestamp to all writes
+  return {
+    ...data,
+    updatedAt: new Date().toISOString(),
+  };
+});
+```
+
+## Network Topologies
+
+Bullet.js supports various network topologies:
+
+- **Mesh**: All peers connect to each other
+- **Star**: All peers connect to a central peer
+- **Chain**: Peers form a linear chain of connections
+- **Bridge**: Separate clusters connected by bridge nodes
+
+## Examples
+
+Check out the examples directory for more detailed usage:
+
+- Basic usage (`examples/bullet-example.js`)
+- Queries (`examples/bullet-query-example.js`)
+- Validation (`examples/bullet-validation-example.js`)
+- Middleware (`examples/bullet-middleware-example.js`)
+- Serialization (`examples/bullet-serializer-example.js`)
+- Network topologies:
+  - Chain (`examples/bullet-chain-example.js`)
+  - Circle (`examples/bullet-circle-network-example.js`)
+  - Bridge (`examples/bullet-bridge-example.js`)
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+MIT
