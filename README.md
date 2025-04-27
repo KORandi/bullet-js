@@ -17,7 +17,7 @@ Bullet.js is a lightweight yet powerful distributed database designed for buildi
 - **Middleware**: Customize behavior with hooks for reads and writes
 - **Serialization**: Import/export data in various formats (JSON, CSV, XML)
 - **Persistence**: Optional storage with encryption support
-- **Conflict Resolution**: Built-in HAM (Hash-Array-Mapped) algorithm for conflict resolution
+- **Conflict Resolution**: Built-in algorithm for conflict resolution
 
 ## Installation
 
