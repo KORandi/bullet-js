@@ -1469,7 +1469,7 @@ Storage adapters in Bullet.js offer flexible ways to persist your data. By under
 
 Now that you've learned about storage adapters, you might want to explore:
 
-- [Performance Optimization](/docs/performance) - Strategies to optimize Bullet.js
-- [Security](/docs/security) - Secure your Bullet.js applications
-- [Deployment](/docs/deployment) - Deploy Bullet.js in production environments
-- [Scaling](/docs/scaling) - Scale your Bullet.js applications
+- [Performance Optimization](/docs/performance.md) - Strategies to optimize Bullet.js
+- [Security](/docs/security.md) - Secure your Bullet.js applications
+- [Deployment](/docs/deployment.md) - Deploy Bullet.js in production environments
+- [Scaling](/docs/scaling.md) - Scale your Bullet.js applications

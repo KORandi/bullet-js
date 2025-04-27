@@ -682,7 +682,7 @@ Conflict resolution is at the heart of Bullet.js's distributed nature. The HAM a
 
 Now that you've learned about conflict resolution, you might want to explore:
 
-- [Network Topologies](/docs/network-topologies) - Configure different distributed architectures
-- [Custom Storage Adapters](/docs/storage-adapters) - Implement specialized persistence layers
-- [Advanced Validation](/docs/advanced-validation) - More complex validation strategies
-- [Performance Optimization](/docs/performance) - Strategies for optimizing Bullet.js applications
+- [Network Topologies](/docs/network-topologies.md) - Configure different distributed architectures
+- [Custom Storage Adapters](/docs/storage-adapters.md) - Implement specialized persistence layers
+- [Advanced Validation](/docs/advanced-validation.md) - More complex validation strategies
+- [Performance Optimization](/docs/performance.md) - Strategies for optimizing Bullet.js applications

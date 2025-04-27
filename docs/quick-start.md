@@ -223,9 +223,9 @@ console.log("Bullet.js server running on port 8765");
 
 In the next sections, you'll learn about:
 
-- [Schema validation](/docs/validation) to ensure data integrity
-- [Middleware](/docs/middleware) for customizing database behavior
-- [Conflict resolution](/docs/conflict-resolution) for handling concurrent updates
-- [Advanced queries](/docs/advanced-queries) for more complex data operations
-- [Network topologies](/docs/network-topologies) for different distributed setups
-- [Custom storage adapters](/docs/storage-adapters) for specialized persistence needs
+- [Schema validation](/docs/validation.md) to ensure data integrity
+- [Middleware](/docs/middleware.md) for customizing database behavior
+- [Conflict resolution](/docs/conflict-resolution.md) for handling concurrent updates
+- [Advanced queries](/docs/advanced-queries.md) for more complex data operations
+- [Network topologies](/docs/network-topologies.md) for different distributed setups
+- [Custom storage adapters](/docs/storage-adapters.md) for specialized persistence needs

@@ -1283,7 +1283,7 @@ Remember that security is not a one-time setup but an ongoing process. Regularly
 
 Now that you've learned about securing Bullet.js applications, you might want to explore:
 
-- [Performance Optimization](/docs/performance) - Optimize your Bullet.js applications
-- [Deployment](/docs/deployment) - Deploy Bullet.js in production environments
-- [Storage Adapters](/docs/storage-adapters) - Learn about secure storage options
-- [Advanced Middleware](/docs/advanced-middleware) - Implement complex security patterns
+- [Performance Optimization](/docs/performance.md) - Optimize your Bullet.js applications
+- [Deployment](/docs/deployment.md) - Deploy Bullet.js in production environments
+- [Storage Adapters](/docs/storage-adapters.md) - Learn about secure storage options
+- [Advanced Middleware](/docs/advanced-middleware.md) - Implement complex security patterns

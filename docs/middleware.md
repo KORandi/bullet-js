@@ -612,7 +612,7 @@ Middleware is one of Bullet.js's most powerful features, allowing you to customi
 
 Now that you've learned about middleware, you might want to explore:
 
-- [Querying](/docs/querying) - Learn how to filter and search your data
-- [Network Topologies](/docs/network-topologies) - Understand different distributed architectures
-- [Conflict Resolution](/docs/conflict-resolution) - Learn how data conflicts are managed
-- [Custom Storage Adapters](/docs/storage-adapters) - Create your own storage backend
+- [Querying](/docs/querying.md) - Learn how to filter and search your data
+- [Network Topologies](/docs/network-topologies.md) - Understand different distributed architectures
+- [Conflict Resolution](/docs/conflict-resolution.md) - Learn how data conflicts are managed
+- [Custom Storage Adapters](/docs/storage-adapters.md) - Create your own storage backend

@@ -722,7 +722,7 @@ console.log("\nAll serialization examples completed.");
 
 Now that you've learned about serialization, you might want to explore:
 
-- [Storage Adapters](/docs/storage-adapters) - Learn about persistent storage options
-- [Middleware](/docs/middleware) - Transform data during operations
-- [Conflict Resolution](/docs/conflict-resolution) - Understand how conflicts are handled
-- [Network Topologies](/docs/network-topologies) - Configure distributed architectures
+- [Storage Adapters](/docs/storage-adapters.md) - Learn about persistent storage options
+- [Middleware](/docs/middleware.md) - Transform data during operations
+- [Conflict Resolution](/docs/conflict-resolution.md) - Understand how conflicts are handled
+- [Network Topologies](/docs/network-topologies.md) - Configure distributed architectures

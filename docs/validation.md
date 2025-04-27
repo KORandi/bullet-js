@@ -347,6 +347,6 @@ console.log("Products:", bullet.get("products").value());
 
 Now that you've learned about validation, you might want to explore:
 
-- [Middleware](/docs/middleware) - Add custom behavior to read and write operations
-- [Querying](/docs/querying) - Learn how to filter and search your data
-- [Advanced Validation](/docs/advanced-validation) - Advanced validation techniques and patterns
+- [Middleware](/docs/middleware.md) - Add custom behavior to read and write operations
+- [Querying](/docs/querying.md) - Learn how to filter and search your data
+- [Advanced Validation](/docs/advanced-validation.md) - Advanced validation techniques and patterns

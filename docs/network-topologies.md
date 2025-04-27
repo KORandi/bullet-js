@@ -687,7 +687,7 @@ The choice of network topology significantly impacts the behavior, performance, 
 
 Now that you've learned about network topologies, you might want to explore:
 
-- [Data Synchronization](/docs/synchronization) - Learn more about sync mechanisms
-- [Conflict Resolution](/docs/conflict-resolution) - Understand how conflicts are handled
-- [Performance Optimization](/docs/performance) - Strategies for optimizing Bullet.js
-- [Security Considerations](/docs/security) - Secure your distributed database
+- [Data Synchronization](/docs/synchronization.md) - Learn more about sync mechanisms
+- [Conflict Resolution](/docs/conflict-resolution.md) - Understand how conflicts are handled
+- [Performance Optimization](/docs/performance.md) - Strategies for optimizing Bullet.js
+- [Security Considerations](/docs/security.md) - Secure your distributed database

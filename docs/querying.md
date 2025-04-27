@@ -443,7 +443,7 @@ const onSaleProducts = bullet.filter(
 
 Now that you've learned about querying data in Bullet.js, you might want to explore:
 
-- [Serialization](/docs/serialization) - Import and export data in different formats
-- [Network Topologies](/docs/network-topologies) - Configure different distributed architectures
-- [Conflict Resolution](/docs/conflict-resolution) - Learn how data conflicts are handled
-- [Optimizing Performance](/docs/performance) - Strategies for faster queries and operations
+- [Serialization](/docs/serialization.md) - Import and export data in different formats
+- [Network Topologies](/docs/network-topologies.md) - Configure different distributed architectures
+- [Conflict Resolution](/docs/conflict-resolution.md) - Learn how data conflicts are handled
+- [Optimizing Performance](/docs/performance.md) - Strategies for faster queries and operations
