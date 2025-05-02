@@ -146,6 +146,47 @@ Example of exported XML:
 </products>
 ```
 
+#### XML Export Options
+
+The XML export supports several options to customize the output:
+
+```javascript
+const xmlOptions = {
+  rootName: "myData", // Name of the root element (default: "bullet")
+  indent: "\t", // Indentation string (default: "  ")
+};
+
+const customXML = bullet.exportToXML("users", xmlOptions);
+```
+
+#### XML Data Type Handling
+
+XML export preserves JavaScript data types by adding `type` attributes:
+
+```xml
+<age type="number">42</age>
+<active type="boolean">true</active>
+<profile type="object">
+  <!-- Nested object properties -->
+</profile>
+<tags type="array">
+  <!-- Array items -->
+</tags>
+```
+
+Special types like Date, RegExp, Set, and Map are also preserved:
+
+```xml
+<created type="Date">2023-05-15T14:30:00.000Z</created>
+<pattern type="RegExp" source="^[a-z]+$" flags="i" />
+<uniqueIds type="Set">
+  <array>
+    <item index="0">123</item>
+    <item index="1">456</item>
+  </array>
+</uniqueIds>
+```
+
 ## Importing Data
 
 ### JSON Import
@@ -207,6 +248,18 @@ if (xmlImportResult.success) {
 }
 ```
 
+#### XML Import Options
+
+XML import supports several options:
+
+```javascript
+const xmlImportOptions = {
+  // Import options can be added here as needed
+};
+
+const result = bullet.importFromXML(xmlData, "users", xmlImportOptions);
+```
+
 ## Handling Custom Types
 
 Bullet.js automatically handles basic JavaScript types, but you can also register custom type handlers:
@@ -256,6 +309,27 @@ console.log(
   location.position instanceof CustomPoint
 );
 console.log("Distance from origin:", location.position.distance());
+```
+
+### Custom Types in XML
+
+Custom types are also preserved in XML serialization:
+
+```javascript
+// Export data with custom types to XML
+const xmlData = bullet.exportToXML("locations");
+
+// Example of custom type in XML
+// <locations path="locations">
+//   <loc1>
+//     <name type="string">Office</name>
+//     <position type="CustomPoint" x="10" y="20" />
+//     <active type="boolean">true</active>
+//   </loc1>
+// </locations>
+
+// Import with custom types
+const result = bullet.importFromXML(xmlData, "imported_locations");
 ```
 
 ### Built-in Type Serializers
@@ -393,6 +467,39 @@ function transformData(oldData) {
   }
 
   return newData;
+}
+```
+
+## Cross-Format Conversions
+
+You can convert between formats by exporting and importing:
+
+```javascript
+// Convert JSON to XML
+function jsonToXml(jsonData, targetPath) {
+  const importResult = bullet.importFromJSON(jsonData);
+
+  if (importResult.success) {
+    const xmlData = bullet.exportToXML(importResult.path);
+    return xmlData;
+  }
+
+  return null;
+}
+
+// Convert CSV to JSON
+function csvToJson(csvData, sourcePath) {
+  const tempPath = "_temp_conversion";
+  const importResult = bullet.importFromCSV(csvData, tempPath);
+
+  if (importResult.success) {
+    const jsonData = bullet.exportToJSON(tempPath);
+    // Clean up the temporary data
+    bullet.get(tempPath).put(null);
+    return jsonData;
+  }
+
+  return null;
 }
 ```
 
@@ -587,6 +694,19 @@ const productsXML = bullet.exportToXML("products", {
 });
 writeFile("products.xml", productsXML);
 
+// Import XML data
+const xmlImportBullet = new Bullet({
+  enableSerializer: true,
+});
+
+// Import the products XML
+const xmlImportResult = xmlImportBullet.importFromXML(
+  productsXML,
+  "xml_products"
+);
+console.log("XML Import result:", xmlImportResult);
+console.log("Imported XML data:", xmlImportBullet.get("xml_products").value());
+
 // Example 4: Custom Type Serialization
 console.log("\n4. Custom Type Serialization:");
 
@@ -626,6 +746,13 @@ bullet.get("locations/loc2").put({
 const locationsJson = bullet.exportToJSON("locations", { prettyPrint: true });
 writeFile("locations.json", locationsJson);
 
+// Export custom types to XML
+const locationsXML = bullet.exportToXML("locations", {
+  rootName: "locations",
+  indent: "  ",
+});
+writeFile("locations.xml", locationsXML);
+
 // Import with custom types
 const customTypeBullet = new Bullet({
   enableSerializer: true,
@@ -638,7 +765,7 @@ customTypeBullet.registerSerializerType(
   (data) => new CustomPoint(data.x, data.y)
 );
 
-// Import the data
+// Import the JSON data
 const customImportResult = customTypeBullet.importFromJSON(
   locationsJson,
   "imported_locations"
@@ -710,12 +837,61 @@ console.log("\nAll serialization examples completed.");
    ```
 
 6. **Use CSV for interoperability**
+
    ```javascript
    // CSV is best for sharing data with other applications
    const exportForSpreadsheet = bullet.exportToCSV("users", {
      delimiter: ",",
      includeHeaders: true,
    });
+   ```
+
+7. **Use XML for structured data**
+
+   ```javascript
+   // XML is best for highly structured data or when working with XML systems
+   const exportForXmlSystems = bullet.exportToXML("config", {
+     rootName: "configuration",
+     indent: "  ",
+   });
+   ```
+
+8. **Test serialization roundtrips**
+
+   ```javascript
+   // Verify that data can be exported and imported without loss
+   function verifyRoundtrip(path, format = "json") {
+     let exported, importResult;
+
+     // Export
+     if (format === "json") {
+       exported = bullet.exportToJSON(path);
+     } else if (format === "xml") {
+       exported = bullet.exportToXML(path);
+     } else if (format === "csv") {
+       exported = bullet.exportToCSV(path);
+     }
+
+     // Import to a test location
+     const testPath = `_test_${path}`;
+     if (format === "json") {
+       importResult = bullet.importFromJSON(exported, testPath);
+     } else if (format === "xml") {
+       importResult = bullet.importFromXML(exported, testPath);
+     } else if (format === "csv") {
+       importResult = bullet.importFromCSV(exported, testPath);
+     }
+
+     // Compare results
+     const original = bullet.get(path).value();
+     const imported = bullet.get(testPath).value();
+
+     // Clean up
+     bullet.get(testPath).put(null);
+
+     // Simple comparison
+     return JSON.stringify(original) === JSON.stringify(imported);
+   }
    ```
 
 ## Next Steps

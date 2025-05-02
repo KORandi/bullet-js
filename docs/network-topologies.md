@@ -1,693 +1,522 @@
-# Network Topologies
+# Bullet.js Network Topologies Implementation
 
-Bullet.js supports various network topologies for distributed data synchronization. This guide explains the different topologies you can implement and their trade-offs, helping you choose the right architecture for your application.
+This document provides a technical overview of how network topologies are implemented in Bullet.js, including the current capabilities, limitations, and recommended patterns for different network configurations.
 
-## You will learn
+## Understanding the Current Implementation
 
-- What network topologies are available in Bullet.js
-- How to implement different topologies
-- The advantages and disadvantages of each topology
-- How data propagates through different network configurations
-- Best practices for designing resilient distributed systems
+Bullet.js's networking layer is primarily implemented in `src/bullet-network.js` and `src/bullet-network-sync.js`. The current implementation provides a flexible WebSocket-based peer-to-peer communication system that can be configured to support various topologies, though these topologies are not explicitly defined as separate modes in the API.
 
-## Understanding Network Topologies
+### Core Network Features
 
-A network topology defines how nodes (peers) in a distributed system are connected to each other. The topology affects important characteristics like:
+The current networking implementation provides these key capabilities:
 
-- Data propagation speed
-- Network resilience
-- Resource usage
-- Scalability
-- Peer discovery
+1. **WebSocket Server Mode**: Each Bullet instance can act as a WebSocket server, accepting connections from other peers
+2. **Client Mode**: Each Bullet instance can connect to other peers via their WebSocket endpoints
+3. **Peer Management**: Automatic tracking of connected peers, with reconnection attempts for configured peers
+4. **Data Synchronization**: Mechanisms for full and partial data synchronization between peers
+5. **Message Relaying**: Messages can be relayed between peers with TTL (Time-To-Live) controls
 
-## Basic Topology Concepts
+### How Topology is Configured
 
-Before diving into specific topologies, let's understand some core concepts:
-
-### Peer Connections
-
-In Bullet.js, peers connect via WebSockets:
+In the current implementation, network topology is implicitly defined by the pattern of peer connections rather than through explicit topology configuration. When initializing a Bullet instance, you specify:
 
 ```javascript
-// Create a Bullet instance that can receive connections
-const serverBullet = new Bullet({
-  server: true, // Enable WebSocket server
-  port: 8765, // WebSocket server port
-});
-
-// Create a Bullet instance that connects to other peers
-const clientBullet = new Bullet({
-  peers: ["ws://server.example.com:8765"], // Connect to a remote peer
-});
-```
-
-### Bidirectional Sync
-
-Connections between peers are bidirectional - data flows in both directions:
-
-```javascript
-// On Server
-serverBullet.get("shared/counter").put(1);
-
-// On Client
-clientBullet.get("shared/counter").on((value) => {
-  console.log("Counter value:", value); // 1
-});
-
-// Client can also update data
-clientBullet.get("shared/counter").put(2);
-
-// Server will receive the update
-serverBullet.get("shared/counter").on((value) => {
-  console.log("Counter value:", value); // 2
-});
-```
-
-### Hop Count and TTL
-
-When data propagates through a network, the hop count tracks how many peers it has passed through:
-
-```javascript
-// Set a maximum time-to-live (TTL) for messages
 const bullet = new Bullet({
-  maxTTL: 32, // Maximum hops for data propagation
+  server: true, // Whether this peer accepts connections
+  port: 8765, // WebSocket server port (if server is true)
+  peers: [
+    // List of peers to connect to
+    "ws://peer1.example.com:8765",
+    "ws://peer2.example.com:8765",
+  ],
+  maxTTL: 32, // Maximum number of hops for relayed messages
 });
 ```
 
-## Mesh Topology
+The combination of these settings across multiple peers determines the effective network topology.
 
-In a mesh topology, each peer connects directly to every other peer. This provides the fastest data propagation but requires the most connections.
+## Implementing Different Topologies
 
-### Implementing a Mesh Topology
+While the API doesn't explicitly support named topologies, you can implement various topologies by configuring your peers appropriately. Here's how to implement common topologies with the current code:
+
+### Mesh Topology
+
+In a mesh topology, every peer connects directly to every other peer. This provides the fastest propagation and highest redundancy, but requires more connections.
+
+**Implementation:**
 
 ```javascript
-// Create 3 peers in a mesh
+// Peer 1
 const peer1 = new Bullet({
   server: true,
   port: 8001,
-  peers: ["ws://localhost:8002", "ws://localhost:8003"],
+  peers: ["ws://host2:8002", "ws://host3:8003"],
 });
 
+// Peer 2
 const peer2 = new Bullet({
   server: true,
   port: 8002,
-  peers: ["ws://localhost:8001", "ws://localhost:8003"],
+  peers: ["ws://host1:8001", "ws://host3:8003"],
 });
 
+// Peer 3
 const peer3 = new Bullet({
   server: true,
   port: 8003,
-  peers: ["ws://localhost:8001", "ws://localhost:8002"],
+  peers: ["ws://host1:8001", "ws://host2:8002"],
 });
 ```
 
-### Advantages
+**Current Behavior:**
 
-- Fastest data propagation (1-hop maximum)
-- High redundancy and fault tolerance
-- No single point of failure
+- Each peer will attempt to connect to all others in the `peers` array
+- Bidirectional connections will be established
+- Messages will be sent directly to all peers without intermediaries
+- If a peer goes offline, others will attempt to reconnect periodically
 
-### Disadvantages
+### Star Topology
 
-- Connection count grows quadratically with peers (n × (n-1) / 2)
-- Resource intensive for large networks
-- Not suitable for networks with hundreds of peers
+In a star topology, all peers connect to a central hub but not directly to each other.
 
-### Best for
-
-- Small to medium networks (up to ~50 peers)
-- Applications requiring real-time synchronization
-- High-availability systems
-
-## Star Topology
-
-In a star topology, all peers connect to a central hub, but not directly to each other. Data propagates through the central node.
-
-### Implementing a Star Topology
+**Implementation:**
 
 ```javascript
-// Central hub
+// Hub (central peer)
 const hub = new Bullet({
   server: true,
   port: 8000,
+  peers: [], // Hub doesn't initiate connections
 });
 
-// Spoke peers connect only to the hub
-const peer1 = new Bullet({
-  peers: ["ws://localhost:8000"],
+// Spoke 1
+const spoke1 = new Bullet({
+  server: false, // Optional: can be true if you want bidirectional capability
+  peers: ["ws://hub-host:8000"],
 });
 
-const peer2 = new Bullet({
-  peers: ["ws://localhost:8000"],
+// Spoke 2
+const spoke2 = new Bullet({
+  server: false, // Optional: can be true if you want bidirectional capability
+  peers: ["ws://hub-host:8000"],
 });
-
-const peer3 = new Bullet({
-  peers: ["ws://localhost:8000"],
-});
-
-// Data flows through the hub
-peer1.get("shared/data").put("Hello from peer1");
-// Hub receives and relays to peer2 and peer3
 ```
 
-### Advantages
+**Current Behavior:**
 
-- Simple to implement and manage
-- Efficient connection count (n connections for n peers)
-- Centralized control and monitoring
+- All data flows through the hub
+- Messages propagate in a maximum of 2 hops
+- If the hub goes down, spokes are disconnected from each other
+- The hub becomes a potential bottleneck and single point of failure
 
-### Disadvantages
+### Chain Topology
 
-- Single point of failure (the hub)
-- Maximum 2-hop propagation delay
-- Hub can become a bottleneck
+In a chain topology, peers form a line with each connecting only to adjacent peers.
 
-### Best for
-
-- Client-server applications
-- Controlled environments
-- Applications with a natural central authority
-
-## Chain Topology
-
-In a chain topology, peers form a line where each peer connects only to its adjacent peers. Data flows through the chain.
-
-### Implementing a Chain Topology
+**Implementation:**
 
 ```javascript
-// Create a 5-node chain
+// First peer in chain
 const peer1 = new Bullet({
   server: true,
   port: 8001,
-  peers: ["ws://localhost:8002"], // Connect only to next peer
+  peers: ["ws://host2:8002"], // Connect only to next peer
 });
 
+// Middle peer
 const peer2 = new Bullet({
   server: true,
   port: 8002,
-  peers: ["ws://localhost:8001", "ws://localhost:8003"], // Connect to previous and next
+  peers: ["ws://host1:8001", "ws://host3:8003"], // Connect to previous and next
 });
 
+// Last peer in chain
 const peer3 = new Bullet({
   server: true,
   port: 8003,
-  peers: ["ws://localhost:8002", "ws://localhost:8004"], // Connect to previous and next
-});
-
-const peer4 = new Bullet({
-  server: true,
-  port: 8004,
-  peers: ["ws://localhost:8003", "ws://localhost:8005"], // Connect to previous and next
-});
-
-const peer5 = new Bullet({
-  server: true,
-  port: 8005,
-  peers: ["ws://localhost:8004"], // Connect only to previous peer
+  peers: ["ws://host2:8002"], // Connect only to previous peer
 });
 ```
 
-### Advantages
+**Current Behavior:**
 
-- Minimal connection count (2 connections per peer)
-- Simple structure
-- Good for pipeline processing
+- Data propagates linearly through the chain
+- Maximum hop count depends on chain length
+- Breaking a connection in the middle splits the network
+- The `maxTTL` setting is important to ensure messages can reach the end of long chains
 
-### Disadvantages
+### Ring Topology
 
-- Slow propagation (up to n-1 hops for n peers)
-- Vulnerable to disconnections
-- High dependency on intermediate nodes
+In a ring topology, peers form a closed loop with each connecting to two others.
 
-### Best for
-
-- Sequential data processing
-- Environments with limited connection capacity
-- Linear network topologies (e.g., sensor arrays)
-
-## Ring Topology
-
-In a ring topology, peers form a circle with each peer connecting to exactly two others, forming a closed loop.
-
-### Implementing a Ring Topology
+**Implementation:**
 
 ```javascript
-// Create a 4-node ring
+// Peer 1
 const peer1 = new Bullet({
   server: true,
   port: 8001,
-  peers: ["ws://localhost:8004", "ws://localhost:8002"], // Connect to previous and next
+  peers: ["ws://host4:8004", "ws://host2:8002"], // Connect to "previous" and "next"
 });
 
+// Peer 2
 const peer2 = new Bullet({
   server: true,
   port: 8002,
-  peers: ["ws://localhost:8001", "ws://localhost:8003"], // Connect to previous and next
+  peers: ["ws://host1:8001", "ws://host3:8003"],
 });
 
+// Peer 3
 const peer3 = new Bullet({
   server: true,
   port: 8003,
-  peers: ["ws://localhost:8002", "ws://localhost:8004"], // Connect to previous and next
+  peers: ["ws://host2:8002", "ws://host4:8004"],
 });
 
+// Peer 4
 const peer4 = new Bullet({
   server: true,
   port: 8004,
-  peers: ["ws://localhost:8003", "ws://localhost:8001"], // Connect to previous and next
+  peers: ["ws://host3:8003", "ws://host1:8001"],
 });
 ```
 
-### Advantages
+**Current Behavior:**
 
-- Even distribution of connections (2 per peer)
-- No endpoints (closed loop)
-- More resilient than a chain
+- Data propagates bidirectionally around the ring
+- Maximum hop count is half the number of peers in the ring
+- One broken connection transforms the ring into a chain
+- Two broken connections would split the network
 
-### Disadvantages
+### Bridge Topology
 
-- Data propagation can still be slow (up to n/2 hops)
-- Requires careful management of peer connections
+A bridge topology connects separate clusters through designated bridge nodes.
 
-### Best for
-
-- Distributed processing with no central authority
-- Systems where each peer has similar responsibilities
-- Applications needing redundancy with minimal connections
-
-## Bridge Topology
-
-In a bridge topology, separate clusters (e.g., mesh networks) are connected by bridge nodes that maintain connections between clusters.
-
-### Implementing a Bridge Topology
+**Implementation:**
 
 ```javascript
-// Cluster A: Mesh network of 3 peers
+// Cluster A: Peer 1 (bridge node)
 const peerA1 = new Bullet({
   server: true,
   port: 8101,
-  peers: ["ws://localhost:8102", "ws://localhost:8103", "ws://localhost:8201"], // Connect to cluster A and bridge
+  peers: [
+    "ws://hostA2:8102", // Cluster A peer
+    "ws://hostA3:8103", // Cluster A peer
+    "ws://hostB1:8201", // Bridge to Cluster B
+  ],
 });
 
+// Cluster A: Peer 2
 const peerA2 = new Bullet({
   server: true,
   port: 8102,
-  peers: ["ws://localhost:8101", "ws://localhost:8103"], // Connect within cluster A
+  peers: ["ws://hostA1:8101", "ws://hostA3:8103"], // Only connect within cluster
 });
 
-const peerA3 = new Bullet({
-  server: true,
-  port: 8103,
-  peers: ["ws://localhost:8101", "ws://localhost:8102"], // Connect within cluster A
-});
-
-// Cluster B: Mesh network of 3 peers
+// Cluster B: Peer 1 (bridge node)
 const peerB1 = new Bullet({
   server: true,
   port: 8201,
-  peers: ["ws://localhost:8202", "ws://localhost:8203", "ws://localhost:8101"], // Connect to cluster B and bridge
+  peers: [
+    "ws://hostB2:8202", // Cluster B peer
+    "ws://hostB3:8203", // Cluster B peer
+    "ws://hostA1:8101", // Bridge to Cluster A
+  ],
 });
 
+// Cluster B: Peer 2
 const peerB2 = new Bullet({
   server: true,
   port: 8202,
-  peers: ["ws://localhost:8201", "ws://localhost:8203"], // Connect within cluster B
-});
-
-const peerB3 = new Bullet({
-  server: true,
-  port: 8203,
-  peers: ["ws://localhost:8201", "ws://localhost:8202"], // Connect within cluster B
-});
-
-// In this setup, peerA1 and peerB1 serve as bridges between clusters
-```
-
-### Advantages
-
-- Combines benefits of different topologies
-- Efficient for geographically distributed systems
-- Allows for segmented networks with controlled data flow
-
-### Disadvantages
-
-- More complex to set up and manage
-- Bridge nodes are critical points of failure
-- May require custom logic for efficient routing
-
-### Best for
-
-- Large-scale distributed systems
-- Multi-region deployments
-- Applications with natural data segmentation
-
-## Hybrid Topologies
-
-You can combine different topologies to create hybrid designs that address specific needs.
-
-### Star-of-Stars (Hierarchical)
-
-```javascript
-// Central hub
-const centralHub = new Bullet({
-  server: true,
-  port: 8000,
-});
-
-// Regional hubs
-const regionA = new Bullet({
-  server: true,
-  port: 8100,
-  peers: ["ws://localhost:8000"], // Connect to central hub
-});
-
-const regionB = new Bullet({
-  server: true,
-  port: 8200,
-  peers: ["ws://localhost:8000"], // Connect to central hub
-});
-
-// Local peers connect to regional hubs
-const peerA1 = new Bullet({
-  peers: ["ws://localhost:8100"],
-});
-
-const peerA2 = new Bullet({
-  peers: ["ws://localhost:8100"],
-});
-
-const peerB1 = new Bullet({
-  peers: ["ws://localhost:8200"],
-});
-
-const peerB2 = new Bullet({
-  peers: ["ws://localhost:8200"],
+  peers: ["ws://hostB1:8201", "ws://hostB3:8203"], // Only connect within cluster
 });
 ```
 
-### Clustering with Supernodes
+**Current Behavior:**
+
+- Data flows between clusters through the bridge nodes
+- Bridge nodes can become bottlenecks
+- If a bridge node fails, clusters become isolated
+- TTL is particularly important to prevent message loops
+
+## Implementation Details
+
+### Message Propagation
+
+Messages in Bullet.js propagate according to these rules:
+
+1. When a peer updates data locally, it broadcasts the change to all its directly connected peers
+2. Each peer receiving a message will:
+
+   - Apply the update locally if it's new or has a higher vector clock
+   - Relay the message to all other connected peers (except the source)
+   - Decrement the TTL of the message before relaying
+
+3. A message is not relayed if:
+   - Its ID has been seen before (tracked in `processedMessages`)
+   - Its TTL has reached zero
+   - It came from the peer being considered
+
+The `_relayMessage` method in `bullet-network.js` handles this logic:
 
 ```javascript
-// Create a network with designated supernodes
-function createClusteredNetwork(clusterCount, peersPerCluster) {
-  const network = [];
-
-  for (let c = 0; c < clusterCount; c++) {
-    // Create a supernode for the cluster
-    const basePort = 8000 + c * 100;
-    const supernode = new Bullet({
-      server: true,
-      port: basePort,
-      peers: [], // Will populate with other supernodes
-    });
-
-    network.push(supernode);
-
-    // Create peers in the cluster
-    for (let p = 1; p <= peersPerCluster; p++) {
-      const peer = new Bullet({
-        peers: [`ws://localhost:${basePort}`], // Connect to cluster supernode
-      });
-
-      network.push(peer);
-    }
+_relayMessage(message, sourcePeerId) {
+  if (message.ttl !== undefined && message.ttl <= 0) {
+    return;
   }
 
-  // Connect supernodes in a mesh
-  const supernodes = network.filter((node) => node.options.server);
+  const relayMessage = {
+    ...message,
+    id: message.id || this._generateId(),
+    ttl: (message.ttl !== undefined ? message.ttl : this.options.maxTTL) - 1,
+  };
 
-  for (let i = 0; i < supernodes.length; i++) {
-    for (let j = 0; j < supernodes.length; j++) {
-      if (i !== j) {
-        const peerUrl = `ws://localhost:${8000 + j * 100}`;
-        supernodes[i].options.peers.push(peerUrl);
-      }
+  this.processedMessages.add(relayMessage.id);
+
+  this.peers.forEach((_, peerId) => {
+    if (peerId !== sourcePeerId) {
+      this.sendToPeer(peerId, relayMessage);
     }
-  }
-
-  return network;
+  });
 }
-
-const clusteredNetwork = createClusteredNetwork(3, 5); // 3 clusters with 5 peers each
 ```
 
-## Data Propagation Across Topologies
+### Vector Clocks for Conflict Resolution
 
-Different topologies affect how quickly data propagates through the network:
+Bullet.js uses vector clocks (`src/bullet-crt.js`) to manage data conflicts when changes propagate through the network. This is essential for ensuring consistency regardless of the network topology:
 
-### Propagation Times
+1. Each peer maintains a vector clock for every piece of data
+2. When data changes, the peer increments its own logical clock
+3. When data is synced, vector clocks are compared to determine the causal relationship
+4. Conflicts are resolved consistently using the CRT algorithm
 
-For a network with n peers:
+### Data Synchronization
 
-| Topology | Best Case | Average Case | Worst Case |
-| -------- | --------- | ------------ | ---------- |
-| Mesh     | 1 hop     | 1 hop        | 1 hop      |
-| Star     | 1 hop     | 2 hops       | 2 hops     |
-| Chain    | 1 hop     | n/2 hops     | n-1 hops   |
-| Ring     | 1 hop     | n/4 hops     | n/2 hops   |
-| Bridge   | 1 hop     | varies       | varies     |
+The `BulletNetworkSync` class handles data synchronization between peers:
 
-### Monitoring Propagation
+1. Initial sync occurs when peers first connect
+2. Periodic syncs can occur at configured intervals
+3. Manual syncs can be requested with `bullet.network.requestSync()`
+4. Sync operations can be full or target specific paths
 
-You can monitor data propagation using events:
+Data is synchronized in chunks to handle large datasets efficiently:
 
 ```javascript
-bullet.on("sync:received", (data) => {
-  console.log("Received data from peer:", data);
-  console.log("Hop count:", data.hops);
-});
+_generateAndSendSyncData(peerId, requestId, since, partial, paths) {
+  // Prepare the data
+  const entries = this._collectSyncData(since, partial, paths);
+  const totalEntries = entries.length;
+  const chunks = this._chunkSyncData(entries);
 
-bullet.on("sync:sent", (data) => {
-  console.log("Sent data to peer:", data);
-  console.log("Hop count:", data.hops);
-});
+  // Send each chunk
+  chunks.forEach((chunk, index) => {
+    this.network.sendToPeer(peerId, {
+      type: "sync-chunk",
+      id: this._generateId(),
+      requestId: requestId,
+      chunkIndex: index,
+      totalChunks: chunks.length,
+      entries: chunk,
+      isLastChunk: index === chunks.length - 1,
+    });
+  });
+}
 ```
 
-## Network Configuration Options
+## Limitations of the Current Implementation
 
-Bullet.js provides several options for configuring network behavior:
+The current networking implementation has some limitations:
+
+1. **No Explicit Topology API**: There's no API to specify a named topology or validate that peers are configured correctly for a specific topology
+
+2. **No Automatic Peer Discovery**: The documentation in `network-topologies.md` describes peer discovery mechanisms, but these aren't implemented in the current code
+
+3. **No Topology-Specific Optimizations**: The code doesn't have specific optimizations for different topologies (e.g., specialized message routing for star or ring topologies)
+
+4. **Limited Diagnostic Tools**: There are basic tools for monitoring sync status but no comprehensive topology visualization or analysis
+
+5. **No Route Optimization**: Messages are relayed to all peers (except the source) rather than using intelligent routing based on network topology
+
+## Best Practices for Working with the Current Implementation
+
+Based on the current implementation, here are best practices for using network topologies in Bullet.js:
+
+### 1. Choose Appropriate TTL Values
+
+The `maxTTL` option is critical for controlling message propagation:
 
 ```javascript
 const bullet = new Bullet({
-  // Network Server
-  server: true, // Run as a WebSocket server
-  port: 8765, // Server port
-  host: "0.0.0.0", // Listen on all interfaces
+  maxTTL: 32, // Default is 32 hops
+});
+```
 
-  // Peer Connections
-  peers: [], // List of peer URLs to connect to
+Best practices:
 
-  // Message Relay
-  maxTTL: 32, // Maximum message hops
-  messageCacheSize: 10000, // Number of message IDs to cache
+- For mesh networks: A low TTL (2-3) is usually sufficient
+- For star networks: TTL should be at least 2
+- For chain/ring: TTL should be at least the length of the chain or half the ring
+- For complex topologies: Higher TTL values ensure messages reach all nodes
 
-  // Sync Settings
-  enableSync: true, // Enable data synchronization
-  syncInterval: 300000, // Sync every 5 minutes
-  syncOptions: {
-    chunkSize: 50, // Items per sync chunk
-    initialSyncTimeout: 30000, // Initial sync timeout
-    retryInterval: 5000, // Retry interval
-    maxSyncAttempts: 3, // Max sync attempts
+### 2. Monitor Network Health
+
+Use the sync statistics to monitor network health:
+
+```javascript
+// Get sync statistics
+const stats = bullet.network.getSyncStats();
+console.log("Network status:", stats);
+
+// Listen for sync events
+bullet.on("sync:complete", (data) => {
+  console.log(`Completed sync with ${data.peerId} in ${data.duration}ms`);
+});
+
+bullet.on("sync:failed", (data) => {
+  console.error(`Sync with ${data.peerId} failed: ${data.reason}`);
+});
+```
+
+### 3. Implement Connection Authentication
+
+Use the connection handler to implement authentication for security:
+
+```javascript
+const bullet = new Bullet({
+  connectionHandler: (req, socket, remotePeerId) => {
+    const token = req.headers["x-auth-token"];
+    if (!validateToken(token)) {
+      console.warn(`Rejected unauthorized connection from ${remotePeerId}`);
+      socket.close();
+      return false;
+    }
+    return true;
+  },
+
+  prepareConnectionHeaders: (peerUrl) => {
+    return {
+      "x-auth-token": generateToken(),
+    };
   },
 });
 ```
 
-## Implementing Dynamic Peer Discovery
+### 4. Implement Server Redundancy
 
-For larger networks, you might want to implement dynamic peer discovery:
+For star topologies, implement redundant hub servers to avoid single points of failure:
 
 ```javascript
-// Create a peer registry server
-const registryServer = new Bullet({
+// Primary hub
+const primaryHub = new Bullet({
+  server: true,
+  port: 8001,
+});
+
+// Backup hub (with connection to primary)
+const backupHub = new Bullet({
+  server: true,
+  port: 8002,
+  peers: ["ws://primary-host:8001"],
+});
+
+// Clients connect to both hubs
+const client = new Bullet({
+  peers: ["ws://primary-host:8001", "ws://backup-host:8002"],
+});
+```
+
+### 5. Implement Manual Peer Discovery
+
+Until automatic peer discovery is implemented, you can implement manual discovery:
+
+```javascript
+// Setup a registry peer
+const registry = new Bullet({
   server: true,
   port: 9000,
 });
 
 // Store active peers
-registryServer.get("activePeers").put({});
+registry.get("peers").put({});
 
 // Peers register themselves
-function registerPeer(peerId, url) {
-  registryServer.get(`activePeers/${peerId}`).put({
-    url,
+function registerPeer(myId, myUrl) {
+  registry.get(`peers/${myId}`).put({
+    url: myUrl,
     lastSeen: Date.now(),
   });
 }
 
 // Peers discover others
 function discoverPeers() {
-  return new Promise((resolve) => {
-    registryServer.get("activePeers").on((peers) => {
-      const peerUrls = Object.values(peers)
-        .filter((peer) => peer.lastSeen > Date.now() - 300000) // Active in last 5 min
-        .map((peer) => peer.url);
+  registry.get("peers").on((peerList) => {
+    const activePeers = Object.values(peerList)
+      .filter((p) => p.lastSeen > Date.now() - 300000) // Active in last 5 mins
+      .map((p) => p.url);
 
-      resolve(peerUrls);
-    });
+    // Connect to discovered peers
+    for (const url of activePeers) {
+      bullet.network.connectToPeer(url);
+    }
   });
 }
-
-// Example usage
-async function connectToPeers(bullet, ownPeerId) {
-  // Register self
-  registerPeer(ownPeerId, `ws://myserver.example.com:${bullet.options.port}`);
-
-  // Discover peers
-  const peerUrls = await discoverPeers();
-
-  // Connect to discovered peers
-  for (const url of peerUrls) {
-    bullet.network.connectToPeer(url);
-  }
-}
 ```
 
-## Real-World Topology Examples
+## Future Improvements
 
-### Local First Collaborative App
+Based on the documentation and current implementation, these improvements would enhance the network topology capabilities:
+
+1. **Explicit Topology Configuration**: Add a `topology` option with predefined configurations:
 
 ```javascript
-// User's local database (always available)
-const localDB = new Bullet({
-  storage: true,
-  storagePath: "./local-data",
+const bullet = new Bullet({
+  topology: "star",
+  topologyOptions: {
+    role: "hub", // or "spoke"
+    redundancy: true,
+  },
 });
-
-// Connect to cloud server when online
-function connectToCloud() {
-  if (navigator.onLine) {
-    localDB.network.connectToPeer("wss://cloud.example.com/sync");
-    console.log("Connected to cloud server");
-  }
-}
-
-// Handle online/offline events
-window.addEventListener("online", connectToCloud);
-window.addEventListener("offline", () => {
-  console.log("Disconnected from cloud - working locally");
-});
-
-// Initial connection
-connectToCloud();
-
-// Users can still work with localDB when offline
-// Changes will sync automatically when reconnected
 ```
 
-### IoT Sensor Network
+2. **Automatic Peer Discovery**: Implement the peer discovery mechanisms described in the documentation:
 
 ```javascript
-// Gateway node (connects to cloud)
-const gateway = new Bullet({
-  server: true,
-  port: 8000,
-  storage: true,
-  peers: ["wss://iot-cloud.example.com"],
+const bullet = new Bullet({
+  discovery: true,
+  discoveryMethod: "registry",
+  registryUrl: "ws://registry.example.com:9000",
 });
-
-// Sensor nodes (connect to gateway)
-const sensors = [];
-for (let i = 1; i <= 10; i++) {
-  const sensor = new Bullet({
-    peers: [`ws://gateway:8000`],
-  });
-
-  // Configure sensor reporting
-  setInterval(() => {
-    sensor.get(`sensors/sensor${i}/readings/${Date.now()}`).put({
-      temperature: 20 + Math.random() * 10,
-      humidity: 40 + Math.random() * 20,
-      timestamp: Date.now(),
-    });
-  }, 60000); // Report every minute
-
-  sensors.push(sensor);
-}
 ```
 
-### Regional Game Server Network
+3. **Intelligent Message Routing**: Add routing optimizations based on the network topology:
 
 ```javascript
-// Global coordinator
-const globalServer = new Bullet({
-  server: true,
-  port: 9000,
-});
-
-// Regional servers as a star with the global server at the center
-const regions = ["us-east", "us-west", "eu-west", "ap-east"];
-const regionalServers = {};
-
-regions.forEach((region) => {
-  // Each regional server connects to the global coordinator
-  regionalServers[region] = new Bullet({
-    server: true,
-    port: 8000, // In reality, these would be on different machines
-    peers: ["ws://global-server:9000"],
-  });
-
-  // Game clients connect to their nearest regional server
-  for (let i = 0; i < 5; i++) {
-    const gameClient = new Bullet({
-      peers: [`ws://${region}:8000`],
-    });
-
-    // Client operations
-    gameClient.get(`gameState/players/${gameClient.id}`).put({
-      position: { x: Math.random() * 100, y: Math.random() * 100 },
-      score: 0,
-      region,
-    });
-  }
-});
-
-// Global state syncs across all regions via the global server
-globalServer.get("globalRankings").on((rankings) => {
-  console.log("Updated global rankings available in all regions");
+const bullet = new Bullet({
+  routing: "optimized", // vs "broadcast"
+  routingCacheSize: 1000,
 });
 ```
 
-## Best Practices for Network Topologies
+4. **Topology Visualization**: Add methods to visualize the current network topology:
 
-1. **Match topology to application needs**
+```javascript
+const topologyMap = bullet.network.getTopologyMap();
+```
 
-   - Mesh for small networks needing low latency
-   - Star for centralized control
-   - Bridges for large, segmented networks
-
-2. **Plan for failures**
-
-   - Add redundant connections for critical paths
-   - Implement automatic reconnection strategies
-   - Consider backup peers for essential services
-
-3. **Monitor network health**
-
-   - Track sync statistics
-   - Monitor peer connection status
-   - Set up alerts for network disruptions
-
-4. **Optimize for your environment**
-
-   - Reduce connections in resource-constrained environments
-   - Add more connections for mission-critical systems
-   - Consider geography when designing multi-region systems
-
-5. **Test network partition scenarios**
-   - Simulate network failures
-   - Verify data integrity after reconnection
-   - Ensure critical functions work offline
+These improvements would align the implementation more closely with the comprehensive capabilities described in the documentation.
 
 ## Conclusion
 
-The choice of network topology significantly impacts the behavior, performance, and resilience of your Bullet.js application. By understanding the characteristics of different topologies, you can design a network architecture that best suits your specific needs, whether you're building a small collaborative app or a large-scale distributed system.
+The current Bullet.js network implementation provides a flexible foundation for building various network topologies through configuration. While it lacks explicit topology-specific APIs and optimizations, you can successfully implement mesh, star, chain, ring, and bridge topologies by configuring peer connections appropriately.
+
+By understanding the core message propagation and synchronization mechanisms, you can make informed decisions about how to structure your Bullet.js network for your specific needs.
 
 ## Next Steps
 
-Now that you've learned about network topologies, you might want to explore:
+Now that you understand the current network topology implementation in Bullet.js, you might want to explore:
 
-- [Data Synchronization](/docs/synchronization.md) - Learn more about sync mechanisms
-- [Conflict Resolution](/docs/conflict-resolution.md) - Understand how conflicts are handled
-- [Performance Optimization](/docs/performance.md) - Strategies for optimizing Bullet.js
-- [Security Considerations](/docs/security.md) - Secure your distributed database
+- [Data Synchronization](/docs/synchronization.md) - Learn more about the sync mechanisms between peers
+- [Conflict Resolution](/docs/conflict-resolution.md) - Understand how data conflicts are handled in distributed setups
+- [Performance Optimization](/docs/performance.md) - Strategies to optimize your Bullet.js network for different loads
+- [Security Guidelines](/docs/security.md) - Learn about securing your distributed Bullet.js databases
+- [Custom Middleware](/docs/middleware.md) - Implement custom middleware for network-aware applications

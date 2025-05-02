@@ -562,7 +562,7 @@ class BulletNetworkSync {
             ? { ...data, __fromNetwork: true, __vectorClock: vectorClock }
             : data;
 
-        // Let the HAM algorithm resolve any conflicts
+        // Let the CRT algorithm resolve any conflicts
         this.bullet.setData(path, networkData, false);
       }
     }

@@ -5,7 +5,7 @@ const BulletQuery = require("./bullet-query");
 const BulletValidation = require("./bullet-validation");
 const BulletMiddleware = require("./bullet-middleware");
 const BulletSerializer = require("./bullet-serializer");
-const BulletHam = require("./bullet-ham");
+const BulletCRT = require("./bullet-crt");
 
 class Bullet {
   constructor(options = {}) {
@@ -59,8 +59,8 @@ class Bullet {
       this.network = new BulletNetwork(this, this.options);
     }
 
-    if (BulletHam && !this.options.disableHam) {
-      this.ham = new BulletHam(this);
+    if (BulletCRT && !this.options.disableCRT) {
+      this.crt = new BulletCRT(this);
     }
   }
 
@@ -129,17 +129,17 @@ class Bullet {
   }
 
   /**
-   * Internal method to set data at a given path with HAM conflict resolution
+   * Internal method to set data at a given path with conflict resolution
    *
    * @param {string} path - Path to set data at
    * @param {*} rawData - Data to set (may include __fromNetwork flag)
    * @param {boolean} [broadcast=true] - Whether to broadcast the change
-   * @returns {*} - The resolved value after HAM
+   * @returns {*} - The resolved value
    */
   setData(path, rawData, broadcast = true) {
     const { data, fromNetwork } = this._stripNetworkFlag(rawData);
     const { doUpdate, value, vectorClock, broadcastData } =
-      this.ham.handleUpdate(path, data, fromNetwork);
+      this.crt.handleUpdate(path, data, fromNetwork);
 
     if (!doUpdate) {
       return value;

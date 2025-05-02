@@ -6,7 +6,7 @@ In a distributed database like Bullet.js, data conflicts are inevitable. When mu
 
 - What conflicts are and why they occur in distributed systems
 - How Bullet.js uses vector clocks to track causality
-- How the HAM (Hypothetical Amnesia Machine) algorithm resolves conflicts
+- How the CRT algorithm resolves conflicts
 - How to customize conflict resolution for your application
 - Best practices for minimizing conflicts
 
@@ -50,13 +50,13 @@ When comparing two vector clocks, there are three possible relationships:
 
 3. **Concurrent modifications**: Neither clock dominates the other. These updates happened concurrently and require conflict resolution.
 
-## The HAM Algorithm
+## The CRT Algorithm
 
-Bullet.js implements the Hypothetical Amnesia Machine (HAM) algorithm for conflict resolution. HAM is a deterministic algorithm that ensures all peers will independently reach the same conclusion when faced with the same conflict.
+Bullet.js implements the algorithm for conflict resolution. CRT is a deterministic algorithm that ensures all peers will independently reach the same conclusion when faced with the same conflict.
 
-### HAM Decision Process
+### CRT Decision Process
 
-When the HAM algorithm encounters a conflict, it follows this process:
+When the CRT algorithm encounters a conflict, it follows this process:
 
 1. Compare the vector clocks to determine if updates are causally related
 2. If one update happened after the other, choose the later update
@@ -64,7 +64,7 @@ When the HAM algorithm encounters a conflict, it follows this process:
 4. Ensure all peers apply the same merge strategy to maintain consistency
 
 ```javascript
-// Simplified HAM decision process
+// Simplified CRT decision process
 function resolveConflict(
   incomingValue,
   currentValue,
@@ -130,11 +130,11 @@ function mergeObjects(incoming, current) {
 
 ### For Arrays
 
-Arrays are treated as ordered collections. By default, array merging in HAM follows these rules:
+Arrays are treated as ordered collections. By default, array merging in CRT follows these rules:
 
 - If the arrays have different lengths, prefer the longer array
 - If arrays have the same length, compare elements one by one
-- For element conflicts, apply the same HAM rules recursively
+- For element conflicts, apply the same CRT rules recursively
 
 ## Conflict Resolution in Action
 
@@ -172,7 +172,7 @@ peerB.get("users/alice/preferences").put({
   language: "es",
 });
 
-// When they reconnect, HAM will merge the changes
+// When they reconnect, CRT will merge the changes
 // The final state will be:
 // {
 //   name: 'Alice',
@@ -187,11 +187,11 @@ peerB.get("users/alice/preferences").put({
 
 ## Customizing Conflict Resolution
 
-Bullet.js allows you to customize conflict resolution by setting a custom comparison function for the HAM algorithm:
+Bullet.js allows you to customize conflict resolution by setting a custom comparison function for the CRT algorithm:
 
 ```javascript
 // Custom conflict resolution
-bullet.ham.setCompare((incoming, existing) => {
+bullet.crt.setCompare((incoming, existing) => {
   // Custom priority-based comparison
   if (incoming.priority && existing.priority) {
     return incoming.priority > existing.priority ? 1 : -1;
@@ -216,11 +216,11 @@ Let's implement a collaborative task list with custom conflict resolution:
 ```javascript
 const Bullet = require("bullet-js");
 
-// Initialize Bullet with HAM enabled
+// Initialize Bullet with CRT enabled
 const bullet = new Bullet();
 
 // Custom comparison function for tasks
-bullet.ham.setCompare((incoming, existing) => {
+bullet.crt.setCompare((incoming, existing) => {
   // For task objects with status
   if (
     incoming &&
@@ -287,7 +287,7 @@ const peerAVectorClock = { peerA: 1 };
 const peerBVectorClock = { peerB: 1 };
 
 // Process both updates
-const result = bullet.ham.processUpdate(
+const result = bullet.crt.processUpdate(
   "tasks/task1",
   peerAUpdate,
   peerAVectorClock,
@@ -365,7 +365,7 @@ function forceUpdate(path, data) {
   forcedClock[bullet.id] = (forcedClock[bullet.id] || 0) + 10;
 
   // Create an update with this clock
-  const update = bullet.ham.createUpdate(path, data);
+  const update = bullet.crt.createUpdate(path, data);
   update.vectorClock = forcedClock;
 
   // Apply the update
@@ -388,12 +388,12 @@ forceUpdate("settings/global", {
 
 ## Monitoring Conflict Resolution
 
-To understand what's happening during conflict resolution, you can monitor the HAM decisions:
+To understand what's happening during conflict resolution, you can monitor the CRT decisions:
 
 ```javascript
-// Listen for HAM decisions
-bullet.on("ham:decision", (event) => {
-  console.log("HAM Decision:", event);
+// Listen for CRT decisions
+bullet.on("CRT:decision", (event) => {
+  console.log("CRT Decision:", event);
   // {
   //   path: 'users/alice',
   //   incoming: true/false,    // Was incoming value used?
@@ -418,11 +418,11 @@ Bullet.js manages vector clocks automatically, but you can interact with them di
 
 ```javascript
 // Get the current vector clock for a path
-const clock = bullet.ham.getVectorClock("users/alice");
+const clock = bullet.crt.getVectorClock("users/alice");
 console.log("Current clock:", clock);
 
 // Create a manual update with a vector clock
-const update = bullet.ham.createUpdate("users/alice", {
+const update = bullet.crt.createUpdate("users/alice", {
   name: "Alice Smith",
   email: "alice@example.com",
 });
@@ -436,7 +436,7 @@ console.log("Generated update:", update);
 
 ## Conflict Resolution with Different Data Types
 
-HAM behavior varies slightly depending on the data type:
+CRT behavior varies slightly depending on the data type:
 
 ### Primitive Values
 
@@ -506,7 +506,7 @@ peerB.get("tags").put(["red", "yellow", "blue"]);
 
 ### Deleted Data
 
-When data is deleted on one peer but modified on another, HAM typically prioritizes existence over non-existence:
+When data is deleted on one peer but modified on another, CRT typically prioritizes existence over non-existence:
 
 ```javascript
 // Peer A deletes data
@@ -552,7 +552,7 @@ peerB.get("users/charlie/profile").put({
 });
 
 // Result depends on the timing and vector clocks
-// HAM might produce:
+// CRT might produce:
 // {
 //   name: 'Charlie',
 //   profile: {
@@ -636,7 +636,6 @@ function addToCart(productId, quantity) {
 }
 
 // If the user adds an item on two devices, the quantities will be combined
-// thanks to HAM's conflict resolution
 ```
 
 ## Advanced Conflict Resolution
@@ -676,7 +675,7 @@ console.log("Page views:", pageViews.value());
 
 ## Conclusion
 
-Conflict resolution is at the heart of Bullet.js's distributed nature. The HAM algorithm ensures that all peers converge to a consistent state, even when updates happen concurrently. By understanding how conflicts are resolved, you can design your data structures and application logic to work harmoniously with Bullet.js's conflict resolution system.
+Conflict resolution is at the heart of Bullet.js's distributed nature. The CRT algorithm ensures that all peers converge to a consistent state, even when updates happen concurrently. By understanding how conflicts are resolved, you can design your data structures and application logic to work harmoniously with Bullet.js's conflict resolution system.
 
 ## Next Steps
 

@@ -1,6 +1,6 @@
-class BulletHAM {
+class BulletCRT {
   /**
-   * Create a new HAM conflict resolver with vector clock support
+   * Create a new conflict resolver with vector clock support
    * @param {Object} bullet - The Bullet instance
    */
   constructor(bullet) {
@@ -18,7 +18,7 @@ class BulletHAM {
   /**
    * Set a custom comparison function for values
    * @param {Function} compareFunction - Custom comparison function
-   * @returns {BulletHAM} This instance for chaining
+   * @returns {BulletCRT} This instance for chaining
    */
   setCompare(compareFunction) {
     this.compare = compareFunction;
@@ -397,4 +397,4 @@ class BulletHAM {
   }
 }
 
-module.exports = BulletHAM;
+module.exports = BulletCRT;
