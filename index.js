@@ -14,7 +14,7 @@ module.exports.Middleware = require("./src/bullet-middleware");
 module.exports.Serializer = require("./src/bullet-serializer");
 
 // Export library version
-module.exports.VERSION = "0.1.3";
+module.exports.VERSION = "0.1.4";
 
 // Simple factory function
 module.exports.create = (options = {}) => new Bullet(options);
