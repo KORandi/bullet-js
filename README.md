@@ -178,11 +178,8 @@ Check out the examples directory for more detailed usage:
 To get started with Bullet.js, explore the following documentation:
 
 - [Quick Start](/docs/quick-start.md): Set up Bullet.js and synchronize data between peers.
-
 - [Schema validation](/docs/validation.md) to ensure data integrity
-
 - [Middleware](/docs/middleware.md) for customizing database behavior
-
 - [Conflict resolution](/docs/conflict-resolution.md) for handling concurrent updates
 
 For a comprehensive overview, refer to the full documentation in the [`docs/`](/docs) folder.
