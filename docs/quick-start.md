@@ -226,6 +226,6 @@ In the next sections, you'll learn about:
 - [Schema validation](/docs/validation.md) to ensure data integrity
 - [Middleware](/docs/middleware.md) for customizing database behavior
 - [Conflict resolution](/docs/conflict-resolution.md) for handling concurrent updates
-- [Advanced queries](/docs/advanced-queries.md) for more complex data operations
+- [Advanced queries](/docs/querying.md) for more complex data operations
 - [Network topologies](/docs/network-topologies.md) for different distributed setups
 - [Custom storage adapters](/docs/storage-adapters.md) for specialized persistence needs
