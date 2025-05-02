@@ -22,7 +22,7 @@ Bullet.js is a lightweight yet powerful distributed database designed for buildi
 ## Installation
 
 ```bash
-npm install bullet-js
+npm install @korandi/bullet-js
 ```
 
 ## Quick Start
