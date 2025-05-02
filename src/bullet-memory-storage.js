@@ -16,6 +16,8 @@ class BulletMemoryStorage extends BulletStorage {
       enableStorageLog: false,
       ...options,
     });
+
+    this._initStorage();
   }
 
   /**

@@ -27,6 +27,8 @@ class BulletFileStorage extends BulletStorage {
     if (!fs.existsSync(this.options.path)) {
       fs.mkdirSync(this.options.path, { recursive: true });
     }
+
+    this._initStorage();
   }
 
   /**

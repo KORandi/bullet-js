@@ -21,9 +21,6 @@ class BulletStorage {
       meta: {},
       log: [],
     };
-
-    // Initialize the storage provider
-    this._initStorage();
   }
 
   /**
