@@ -65,15 +65,29 @@ class BulletFileStorage extends BulletStorage {
    * @protected
    * @override
    */
+  /**
+   * Load persisted data from disk
+   * @protected
+   * @override
+   */
   _loadData() {
+    if (this.bullet.middleware) {
+      this.bullet.middleware.emitEvent("storage:save:start");
+    }
+
     try {
+      const startTime = Date.now();
+      let loadedItems = 0;
+
       const storePath = path.join(this.options.path, "store.json");
       if (fs.existsSync(storePath)) {
         const storeData = fs.readFileSync(storePath);
         const storeJson = this._decrypt(storeData);
 
-        this._deepMerge(this.bullet.store, JSON.parse(storeJson));
+        const parsedStore = JSON.parse(storeJson);
+        this._deepMerge(this.bullet.store, parsedStore);
         this.persisted.store = JSON.parse(JSON.stringify(this.bullet.store));
+        loadedItems += Object.keys(parsedStore).length;
       }
 
       const metaPath = path.join(this.options.path, "meta.json");
@@ -81,8 +95,10 @@ class BulletFileStorage extends BulletStorage {
         const metaData = fs.readFileSync(metaPath);
         const metaJson = this._decrypt(metaData);
 
-        Object.assign(this.bullet.meta, JSON.parse(metaJson));
+        const parsedMeta = JSON.parse(metaJson);
+        Object.assign(this.bullet.meta, parsedMeta);
         this.persisted.meta = JSON.parse(JSON.stringify(this.bullet.meta));
+        loadedItems += Object.keys(parsedMeta).length;
       }
 
       const logPath = path.join(this.options.path, "log.json");
@@ -90,20 +106,36 @@ class BulletFileStorage extends BulletStorage {
         const logData = fs.readFileSync(logPath);
         const logJson = this._decrypt(logData);
 
-        this.bullet.log = [...this.bullet.log, ...JSON.parse(logJson)];
+        const parsedLog = JSON.parse(logJson);
+        this.bullet.log = [...this.bullet.log, ...parsedLog];
 
         if (this.bullet.log.length > 1000) {
           this.bullet.log = this.bullet.log.slice(-1000);
         }
 
         this.persisted.log = [...this.bullet.log];
+        loadedItems += parsedLog.length;
       }
 
       if (this.options.enableStorageLog) {
         console.log("Bullet: Data loaded from file storage");
       }
+
+      // Emit the storage:load:complete event
+      if (this.bullet.middleware) {
+        this.bullet.middleware.emitEvent("storage:load:complete", {
+          store: this.bullet.store,
+          duration: Date.now() - startTime,
+          items: loadedItems,
+        });
+      }
     } catch (err) {
       console.error("Error loading persisted data:", err);
+
+      // Emit storage:error event if middleware exists
+      if (this.bullet.middleware) {
+        this.bullet.middleware.emitEvent("storage:error", err);
+      }
     }
   }
 
@@ -115,6 +147,10 @@ class BulletFileStorage extends BulletStorage {
   _saveData() {
     try {
       if (this._hasChanges()) {
+        if (this.bullet.middleware) {
+          this.bullet.middleware.emitEvent("storage:save:start");
+        }
+
         const storeJson = JSON.stringify(this.bullet.store);
         const storeData = this._encrypt(storeJson);
         fs.writeFileSync(path.join(this.options.path, "store.json"), storeData);
@@ -134,9 +170,17 @@ class BulletFileStorage extends BulletStorage {
         if (this.options.enableStorageLog) {
           console.log("Bullet: Data persisted to file storage");
         }
+
+        if (this.bullet.middleware) {
+          this.bullet.middleware.emitEvent("storage:save:complete");
+        }
       }
     } catch (err) {
       console.error("Error saving data:", err);
+
+      if (this.bullet.middleware) {
+        this.bullet.middleware.emitEvent("storage:error", err);
+      }
     }
 
     return Promise.resolve();

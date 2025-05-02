@@ -35,7 +35,7 @@ class BulletMiddleware {
           }
         } catch (error) {
           console.error(`Error in 'get' middleware:`, error);
-          this._emitEvent("error", {
+          this.emitEvent("error", {
             operation: "get",
             path: modifiedPath,
             error,
@@ -53,7 +53,7 @@ class BulletMiddleware {
           }
         } catch (error) {
           console.error(`Error in 'afterGet' middleware:`, error);
-          this._emitEvent("error", {
+          this.emitEvent("error", {
             operation: "afterGet",
             path: modifiedPath,
             data,
@@ -62,7 +62,7 @@ class BulletMiddleware {
         }
       }
 
-      this._emitEvent("read", { path: modifiedPath, data });
+      this.emitEvent("read", { path: modifiedPath, data });
 
       return data;
     };
@@ -93,7 +93,7 @@ class BulletMiddleware {
           }
         } catch (error) {
           console.error(`Error in 'put' middleware:`, error);
-          this._emitEvent("error", {
+          this.emitEvent("error", {
             operation: "put",
             path: modifiedPath,
             data: modifiedData,
@@ -114,7 +114,7 @@ class BulletMiddleware {
             middleware(modifiedPath, modifiedData, oldData);
           } catch (error) {
             console.error(`Error in 'afterPut' middleware:`, error);
-            this._emitEvent("error", {
+            this.emitEvent("error", {
               operation: "afterPut",
               path: modifiedPath,
               data: modifiedData,
@@ -124,7 +124,7 @@ class BulletMiddleware {
           }
         }
 
-        this._emitEvent("write", {
+        this.emitEvent("write", {
           path: modifiedPath,
           data: modifiedData,
           oldData,
@@ -148,7 +148,7 @@ class BulletMiddleware {
             }
           } catch (error) {
             console.error(`Error in 'delete' middleware:`, error);
-            this.bullet.middleware._emitEvent("error", {
+            this.bullet.middleware.emitEvent("error", {
               operation: "delete",
               path,
               error,
@@ -169,7 +169,7 @@ class BulletMiddleware {
               middleware(path, oldData);
             } catch (error) {
               console.error(`Error in 'afterDelete' middleware:`, error);
-              this.bullet.middleware._emitEvent("error", {
+              this.bullet.middleware.emitEvent("error", {
                 operation: "afterDelete",
                 path,
                 oldData,
@@ -178,7 +178,7 @@ class BulletMiddleware {
             }
           }
 
-          this.bullet.middleware._emitEvent("delete", { path, oldData });
+          this.bullet.middleware.emitEvent("delete", { path, oldData });
         }
 
         return this;
@@ -290,7 +290,7 @@ class BulletMiddleware {
    * @param {Object} data - Event data
    * @private
    */
-  _emitEvent(event, data) {
+  emitEvent(event, data) {
     if (this.eventListeners[event]) {
       for (const listener of this.eventListeners[event]) {
         try {

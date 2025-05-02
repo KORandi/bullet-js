@@ -71,6 +71,10 @@ class BulletMemoryStorage extends BulletStorage {
   _saveSnapshot() {
     // Store the current state in memory
     if (this._hasChanges()) {
+      if (this.bullet.middleware) {
+        this.bullet.middleware.emitEvent("storage:save:start");
+      }
+
       try {
         // Create deep copies of the data to avoid reference issues
         this.persisted.store = JSON.parse(JSON.stringify(this.bullet.store));
@@ -82,6 +86,14 @@ class BulletMemoryStorage extends BulletStorage {
         }
       } catch (err) {
         console.error("Error creating memory snapshot:", err);
+
+        if (this.bullet.middleware) {
+          this.bullet.middleware.emitEvent("storage:error", err);
+        }
+      }
+
+      if (this.bullet.middleware) {
+        this.bullet.middleware.emitEvent("storage:save:complete");
       }
     }
     return Promise.resolve();
