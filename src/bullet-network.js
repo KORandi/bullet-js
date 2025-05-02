@@ -13,6 +13,7 @@ class BulletNetwork extends EventEmitter {
       maxTTL: 32,
       messageCacheSize: 10000,
       enableSync: true,
+      connectionHandler: null,
       ...options,
     };
 
@@ -82,6 +83,14 @@ class BulletNetwork extends EventEmitter {
       return;
     }
 
+    if (typeof this.options.connectionHandler === "function") {
+      const allowed = this.options.connectionHandler(req, socket, remotePeerId);
+
+      if (allowed === false) {
+        return;
+      }
+    }
+
     console.log(`Incoming connection from peer: ${remotePeerId}`);
 
     const existingPeer = this.peers.get(remotePeerId);
@@ -131,10 +140,20 @@ class BulletNetwork extends EventEmitter {
     try {
       console.log(`Initiating outbound connection to peer: ${peerUrl}`);
 
+      const headers = {
+        "x-peer-id": this.localPeerId,
+      };
+
+      // Allow custom auth headers to be added
+      if (typeof this.options.prepareConnectionHeaders === "function") {
+        const customHeaders = this.options.prepareConnectionHeaders(peerUrl);
+        if (customHeaders && typeof customHeaders === "object") {
+          Object.assign(headers, customHeaders);
+        }
+      }
+
       const socket = new WebSocket(peerUrl, {
-        headers: {
-          "x-peer-id": this.localPeerId,
-        },
+        headers: headers,
       });
 
       socket.on("open", () => {
