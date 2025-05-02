@@ -47,14 +47,35 @@ class BulletFileStorage extends BulletStorage {
 
     // Handle graceful shutdown
     process.on("exit", () => {
-      this._saveData();
+      try {
+        if (this._saveData) {
+          this._saveData();
+        }
+      } catch (err) {
+        console.error("Error during exit save:", err);
+      }
     });
 
     ["SIGINT", "SIGTERM", "SIGQUIT"].forEach((signal) => {
-      process.on(signal, () => {
-        this._saveData();
+      process.on(signal, async () => {
+        console.log(`Received ${signal}, saving data and shutting down...`);
+
+        // Clear the interval first to prevent further auto-saves
         if (this.saveInterval) {
           clearInterval(this.saveInterval);
+          this.saveInterval = null;
+        }
+
+        try {
+          this._saveData();
+          console.log("Data saved successfully");
+        } catch (err) {
+          console.error("Error saving data:", err);
+        } finally {
+          // Add a small delay before exiting to ensure all operations finish
+          setTimeout(() => {
+            process.exit(0);
+          }, 100);
         }
       });
     });
@@ -276,7 +297,7 @@ class BulletFileStorage extends BulletStorage {
       this.saveInterval = null;
     }
 
-    await this._saveData();
+    this._saveData();
 
     if (this.options.enableStorageLog) {
       console.log("Bullet: File storage closed");
